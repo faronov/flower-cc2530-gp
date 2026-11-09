@@ -2,6 +2,7 @@
  * Copyright (c) 2026, cc2530-zigbee contributors. See LICENSE.
  */
 #include "flower.h"
+#include "sensors.h"
 
 /* SWRU191F 7.18 PERCFG, 7.18 P2SEL, 12.2 APCFG/ADCCON1/ADCCON3. */
 #define T3_ALT2 0x20u
@@ -36,18 +37,26 @@ void flower_init(void)
     MMIO_WRITE(SOC_T3CC0, 4u);
 }
 
+void flower_excitation_off(void)
+{
+    MMIO_CLEAR(SOC_T3CTL, 0x10u);
+    MMIO_SET(SOC_T3CTL, 0x04u);
+    MMIO_CLEAR(SOC_P1, BOARD_FLOWER_PWM);
+    MMIO_CLEAR(SOC_P1SEL, BOARD_FLOWER_PWM);
+}
+
 void flower_power(uint8_t on)
 {
     if (on) {
         MMIO_SET(SOC_P1, BOARD_FLOWER_RAIL);
+        sensors_bus(1);
         MMIO_SET(SOC_P1SEL, BOARD_FLOWER_PWM);
         MMIO_SET(SOC_T3CTL, 0x10u);
         return;
     }
-    MMIO_CLEAR(SOC_T3CTL, 0x10u);
-    MMIO_SET(SOC_T3CTL, 0x04u);
-    MMIO_CLEAR(SOC_P1, BOARD_FLOWER_PWM | BOARD_FLOWER_RAIL);
-    MMIO_CLEAR(SOC_P1SEL, BOARD_FLOWER_PWM);
+    flower_excitation_off();
+    sensors_bus(0);
+    MMIO_CLEAR(SOC_P1, BOARD_FLOWER_RAIL);
 }
 
 /* n single conversions (ADCCON3, SWRU191F 12.2.10) averaged as 14-bit

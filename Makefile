@@ -16,7 +16,7 @@ TARGET := -target mcs51 -mcpu=cc2530
 CFLAGS_FW := $(TARGET) -std=c99 -Os -Wall -ffunction-sections -fdata-sections \
 	-I$(STACK)/toolchain/clang/include -Iinclude -I$(STACK)/include \
 	-DCC2530_BOARD=2 -DCC2530_APP $(GPD_DEFINES)
-SOURCES := src/gpd_main.c src/flower.c $(STACK)/src/clock.c $(STACK)/src/timebase.c
+SOURCES := src/gpd_main.c src/flower.c src/sensors.c src/settings.c $(STACK)/src/clock.c $(STACK)/src/timebase.c
 OBJECTS := $(patsubst %.c,$(OUT)/obj/%.o,$(notdir $(SOURCES)))
 HEADERS := $(wildcard include/*.h)
 

@@ -5,7 +5,7 @@ Firmware for the DIYRuZ FlowerX soil sensor (CC2530) that works as a
 wakes from PM2, measures, broadcasts one GPDF and goes back to sleep. A Green
 Power proxy or sink, such as ZHA with the bundled quirk, receives it.
 
-- Image: about 9.5 KB, non-banked (the regular Zigbee end-device image is
+- Image: about 20 KB, non-banked (the regular Zigbee end-device image is
   about 240 KB).
 - Toolchain: LLVM MCS-51 ([faronov/llvm-project](https://github.com/faronov/llvm-project)),
   pinned through the [cc2530-zigbee](https://github.com/faronov/cc2530-zigbee)
@@ -13,34 +13,92 @@ Power proxy or sink, such as ZHA with the bundled quirk, receives it.
 - Measurement: the same as [flower-cc2530](https://github.com/faronov/flower-cc2530):
   soil probe (Timer 3, 4 MHz), photo resistor, chip temperature, and battery
   voltage (2 × AAA alkaline curve).
+- Optional sensors, detected at every start: a BME280 (I²C, SCL P0.5,
+  SDA P0.6) for air temperature, humidity and pressure, and a DS18B20
+  (1-Wire, P1.3) for soil temperature.
 
 ## Radio protocol
 
 - Frame type: Green Power Device Frames, ApplicationID 0 (SrcID), **no
   security**, unidirectional. The MAC sequence number is the frame counter.
-- Channel: **15**, fixed (`GPD_CHANNEL` in `src/gpd_main.c`).
 - SrcID: the low 32 bits of the chip IEEE address, avoiding the reserved
   values.
-- Commissioning: for the first 12 rounds after power-on, every 10 s, it sends
-  a Commissioning frame (0xE0) followed by a report. The Commissioning frame
-  uses DeviceID 0x33, manufacturer 0x6D6B, model 0xF100, and server clusters
-  0x0001, 0x0400, 0x0402 and 0x0408.
-- Reports: after commissioning, a Multi-Cluster Reporting frame (0xA2) every
-  60 s (`GPD_INTERVAL`). It carries temperature (0x0402), soil moisture
-  (0x0408), illuminance (0x0400), battery voltage (0x0001/0x0020) and battery
-  remaining (0x0001/0x0021), all in their ZCL encodings.
-- Repeats and sleep: each GPDF is sent 3 times, 20 ms apart, with PM2 between
-  repetitions and between rounds. During the 50-ms probe warm-up the CPU
-  idles, because PM2 would stop Timer 3, which drives the soil probe.
+- Commissioning frame (0xE0): DeviceID 0x33, manufacturer 0x6D6B, model
+  `0xF100 | sensors` (bit 0 BME280, bit 1 DS18B20). Server clusters are
+  0x0001, 0x0400, 0x0402 and 0x0408, plus 0x0405 and 0x0403 with a BME280.
+- Reports: a Multi-Cluster Reporting frame (0xA2) every 60 s
+  (`GPD_INTERVAL`). It carries the following values, all in their ZCL
+  encodings:
+  - temperature (0x0402), from the BME280 if present, else the chip
+    sensor;
+  - soil moisture (0x0408);
+  - illuminance (0x0400);
+  - battery voltage (0x0001/0x0020) and battery remaining (0x0001/0x0021);
+  - with a BME280: humidity (0x0405) and pressure (0x0403, hPa);
+  - with a DS18B20: soil temperature (0x0402, attribute 0x5000).
+- Repeats and sleep: each GPDF is sent 3 times, 20 ms apart, with PM2
+  between repetitions and between rounds. The CPU idles instead of sleeping
+  during the 50-ms probe warm-up, because PM2 would stop Timer 3, which
+  drives the soil probe.
+
+### Channel search and commissioning
+
+Commissioning runs on the first start, when the detected sensor set
+changes, and after a 3-s button press. It does up to 12 rounds, 10 s apart.
+Each round works as follows:
+
+1. **Channel search (GP Basic A.3.9.1).** Up to 6 attempts, 400 ms apart.
+   Each attempt sends a Maintenance *Channel Request* (0xE3) on every
+   channel, with Auto-Commissioning set. The *hint* channel (the saved one,
+   or `GPD_CHANNEL` = 15) goes last, with Auto-Commissioning cleared. The
+   device then listens there for 18–40 ms.
+2. **Answer.** A GP proxy of the network (the TempMaster) can answer with a
+   *Channel Configuration* (0xF3) carrying the operational channel. It does
+   so only while the sink is in commissioning mode, which in ZHA means
+   permit join is open.
+3. **Commissioning.** An answer ends the rounds: one Commissioning frame
+   and a report go out on that channel, and the channel is saved. Without an
+   answer, the round sends them on the hint channel instead, as the old
+   fixed-channel firmware did.
+
+The ZHA coordinator itself cannot answer: bellows/EZSP never sends GP
+frames to a GPD. The answer therefore needs a GP proxy, for example an IKEA
+TRÅDFRI router, within radio range. Without one, keep the network on
+channel 15 or rebuild with another hint:
+`make firmware GPD_DEFINES=-DGPD_CHANNEL=20`.
+
+### Button and LED
+
+| Button (P2.0)  | Action |
+|----------------|--------|
+| short press    | measure and report now (LED flash) |
+| hold 3 s       | LED on; on release, search the channel and commission |
+| hold 10 s      | LED blinks; on release, send Decommissioning (0xE1), clear the settings and stop reporting |
+
+The button wakes the device from PM2 through the port 2 interrupt.
+
+LED (P0.1) signals:
+- one flash per channel-search attempt;
+- 1 s on: the channel was found;
+- 3 blinks: the channel was not found (the hint channel is used);
+- 5 blinks: decommissioned.
+
+### Settings
+
+The channel and the sensor set are kept in flash page 125 (0x3E800), as a
+log of 4-byte records written by DMA. A chip erase (`cc-tool -e`) therefore
+means a first start.
 
 ## Pairing with ZHA
 
 1. Copy `quirks/zha_quirk_diyruz_flowerx_gp.py` to
    `<HA config>/custom_zha_quirks/` and restart Home Assistant. This needs a
    ZHA build with Green Power support.
-2. Put the coordinator network on channel 15, or rebuild with another
-   channel: `make firmware GPD_DEFINES=-DGPD_CHANNEL=20`.
-3. Permit joining, then power the sensor within two minutes.
+2. Permit joining.
+3. Power the sensor (first start), or hold its button for 3 s.
+
+Each accepted Commissioning frame re-adds the device in ZHA while permit
+join is open. After pairing, close permit join.
 
 ## Flashing
 

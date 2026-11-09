@@ -1,8 +1,10 @@
 """ZHA Green Power quirk for the DIYRuZ FlowerX soil sensor GPD prototype (flower-gp).
 
 The GPD commissions with DeviceID 0x33 (IndoorEnvironmentSensor), manufacturer 0x6D6B
-and model 0xF100, then sends unsecured Multi-Cluster Reporting (0xA2) frames carrying
-the ZCL MeasuredValue encodings of the regular FlowerX firmware.
+and model 0xF100 | sensors (bit 0: BME280, bit 1: DS18B20), then sends unsecured
+Multi-Cluster Reporting (0xA2) frames carrying the ZCL MeasuredValue encodings of the
+regular FlowerX firmware. A BME280 adds humidity (0x0405) and pressure (0x0403, hPa);
+a DS18B20 adds the soil temperature as 0x0402 attribute 0x5000.
 Copy to <HA config>/custom_zha_quirks/ (requires ZHA with Green Power support).
 """
 
@@ -12,7 +14,13 @@ from typing import Any
 
 from zha.application.platforms.sensor import BaseSensor
 from zha.application.platforms.sensor.const import SensorDeviceClass, SensorStateClass
-from zha.units import LIGHT_LUX, PERCENTAGE, UnitOfElectricPotential, UnitOfTemperature
+from zha.units import (
+    LIGHT_LUX,
+    PERCENTAGE,
+    UnitOfElectricPotential,
+    UnitOfPressure,
+    UnitOfTemperature,
+)
 from zigpy.device import GreenPowerCommandReceived
 from zigpy.zgp.types import DeviceID, GPDCommandID
 
@@ -20,6 +28,8 @@ from zhaquirks.builder import GreenPowerQuirkBuilder
 
 FLOWER_GP_MANUFACTURER_ID = 0x6D6B
 FLOWER_GP_MODEL_ID = 0xF100
+FLOWER_GP_HAS_BME280 = 0x01
+FLOWER_GP_HAS_DS18B20 = 0x02
 
 
 class FlowerGreenPowerSensor(BaseSensor):
@@ -112,6 +122,40 @@ class FlowerIlluminance(FlowerGreenPowerSensor):
         return 0.0 if raw == 0 else round(10 ** ((raw - 1) / 10000), 1)
 
 
+class FlowerSoilTemperature(FlowerTemperature):
+    """DS18B20 soil temperature (0x0402 manufacturer attribute 0x5000, 0.01 °C)."""
+
+    _attribute_id = 0x5000
+
+
+class FlowerHumidity(FlowerGreenPowerSensor):
+    """BME280 humidity (0x0405 MeasuredValue, 0.01 %)."""
+
+    _cluster_id, _attribute_id, _invalid = 0x0405, 0x0000, 0xFFFF
+    _attr_device_class = SensorDeviceClass.HUMIDITY
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_suggested_display_precision = 0
+
+    @staticmethod
+    def convert(raw: int) -> float:
+        """Convert hundredths of a percent."""
+        return raw / 100
+
+
+class FlowerPressure(FlowerGreenPowerSensor):
+    """BME280 pressure (0x0403 MeasuredValue, 0.1 kPa)."""
+
+    _cluster_id, _attribute_id, _invalid = 0x0403, 0x0000, -0x8000
+    _attr_device_class = SensorDeviceClass.PRESSURE
+    _attr_native_unit_of_measurement = UnitOfPressure.HPA
+    _attr_suggested_display_precision = 0
+
+    @staticmethod
+    def convert(raw: int) -> float:
+        """0.1 kPa equals 1 hPa."""
+        return float(raw)
+
+
 class FlowerBattery(FlowerGreenPowerSensor):
     """Battery remaining (0x0001 BatteryPercentageRemaining, 0.5 %)."""
 
@@ -140,31 +184,43 @@ class FlowerBatteryVoltage(FlowerGreenPowerSensor):
         return raw / 10
 
 
-(
-    GreenPowerQuirkBuilder()
-    .applies_to(
-        device_id=DeviceID.IndoorEnvironmentSensor,
-        manufacturer_id=FLOWER_GP_MANUFACTURER_ID,
-        model_id=FLOWER_GP_MODEL_ID,
+for _sensors in range(4):
+    _quirk = (
+        GreenPowerQuirkBuilder()
+        .applies_to(
+            device_id=DeviceID.IndoorEnvironmentSensor,
+            manufacturer_id=FLOWER_GP_MANUFACTURER_ID,
+            model_id=FLOWER_GP_MODEL_ID | _sensors,
+        )
+        .adds_entity(
+            FlowerSoilMoisture,
+            unique_id_suffix="soil_moisture",
+            fallback_name="Soil moisture",
+            primary=True,
+        )
+        .adds_entity(
+            FlowerTemperature, unique_id_suffix="temperature", fallback_name="Temperature"
+        )
+        .adds_entity(
+            FlowerIlluminance, unique_id_suffix="illuminance", fallback_name="Illuminance"
+        )
+        .adds_entity(FlowerBattery, unique_id_suffix="battery", fallback_name="Battery")
+        .adds_entity(
+            FlowerBatteryVoltage,
+            unique_id_suffix="battery_voltage",
+            fallback_name="Battery voltage",
+        )
     )
-    .adds_entity(
-        FlowerSoilMoisture,
-        unique_id_suffix="soil_moisture",
-        fallback_name="Soil moisture",
-        primary=True,
-    )
-    .adds_entity(
-        FlowerTemperature, unique_id_suffix="temperature", fallback_name="Temperature"
-    )
-    .adds_entity(
-        FlowerIlluminance, unique_id_suffix="illuminance", fallback_name="Illuminance"
-    )
-    .adds_entity(FlowerBattery, unique_id_suffix="battery", fallback_name="Battery")
-    .adds_entity(
-        FlowerBatteryVoltage,
-        unique_id_suffix="battery_voltage",
-        fallback_name="Battery voltage",
-    )
-    .friendly_name(manufacturer="DIYRuZ", model="FlowerX GP")
-    .add_to_registry()
-)
+    if _sensors & FLOWER_GP_HAS_BME280:
+        _quirk.adds_entity(
+            FlowerHumidity, unique_id_suffix="humidity", fallback_name="Humidity"
+        ).adds_entity(
+            FlowerPressure, unique_id_suffix="pressure", fallback_name="Pressure"
+        )
+    if _sensors & FLOWER_GP_HAS_DS18B20:
+        _quirk.adds_entity(
+            FlowerSoilTemperature,
+            unique_id_suffix="soil_temperature",
+            fallback_name="Soil temperature",
+        )
+    _quirk.friendly_name(manufacturer="DIYRuZ", model="FlowerX GP").add_to_registry()

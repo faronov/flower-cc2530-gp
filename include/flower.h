@@ -43,8 +43,10 @@
 void flower_startup(void);
 /* Timer 3 as the soil excitation (P1.4 stays a low GPIO until power on). */
 void flower_init(void);
-/* Sensor rail and excitation on or off. */
+/* Sensor rail, sensor bus pulls and excitation on or off. */
 void flower_power(uint8_t on);
+/* Excitation off (Timer 3 stops in PM2), the rail stays on. */
+void flower_excitation_off(void);
 /* One measurement into v (the rail must have warmed up). */
 void flower_measure(gpd_values_t MCU_XDATA *v);
 

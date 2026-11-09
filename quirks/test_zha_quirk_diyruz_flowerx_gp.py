@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from zha.quirks import DEVICE_REGISTRY
 from zigpy.device import GreenPowerCommandReceived, GreenPowerDevice
 from zigpy.zgp.commands import GPCommissioningPayload, GPMultiClusterReportingPayload
@@ -14,6 +16,10 @@ COMMISSIONING = bytes.fromhex("33450b6b6d00f1040100000402040804")
 REPORT = bytes.fromhex(
     "02040000290cfe080400002110270004000021ffff01002000201e0100210020c8"
 )
+# The same frames with a BME280 and a DS18B20 (model 0xF103).
+COMMISSIONING_ALL = bytes.fromhex("33450b6b6d03f106010000040204080405040304")
+REPORT_ALL = REPORT + bytes.fromhex("05040000218f170304000029f5030204005029e204")
+BASE = {"soil_moisture", "temperature", "illuminance", "battery", "battery_voltage"}
 
 
 def _report(command):
@@ -23,29 +29,57 @@ def _report(command):
     )
 
 
-def test_flower_gp_quirk():
-    commissioning, rest = GPCommissioningPayload.deserialize(COMMISSIONING)
+def _device(frame):
+    commissioning, rest = GPCommissioningPayload.deserialize(frame)
     assert rest == b""
-
     gpd = GreenPowerDevice(
         MagicMock(), application_id=ApplicationID.SrcID, src_id=SrcID(0x0EF62815)
     )
     gpd.device_id = commissioning.device_id
     gpd.gpd_manufacturer_id = commissioning.manufacturer_id
     gpd.gpd_model_id = commissioning.model_id
-
     entry = DEVICE_REGISTRY.match_green_power_entry(gpd)
     assert entry is not None
     zha_device = entry.zha_device_factory(DEVICE_REGISTRY.resolve(gpd), MagicMock())
     assert zha_device.name == "DIYRuZ FlowerX GP"
-
     entities = {e.unique_id.rsplit("-", 1)[1]: e for e in zha_device.discover_entities()}
-    assert set(entities) == {
-        "soil_moisture", "temperature", "illuminance", "battery", "battery_voltage",
-    }
     for entity in entities.values():
         entity.on_add()
         assert entity.native_value is None
+    return gpd, entities
+
+
+@pytest.mark.parametrize(
+    ("model", "extra"),
+    [
+        (0xF101, {"humidity", "pressure"}),
+        (0xF102, {"soil_temperature"}),
+    ],
+)
+def test_flower_gp_variants(model, extra):
+    frame = bytearray(COMMISSIONING)
+    frame[5:7] = model.to_bytes(2, "little")
+    _, entities = _device(bytes(frame))
+    assert set(entities) == BASE | extra
+
+
+def test_flower_gp_quirk_all_sensors():
+    gpd, entities = _device(COMMISSIONING_ALL)
+    assert set(entities) == BASE | {"humidity", "pressure", "soil_temperature"}
+    report, rest = GPMultiClusterReportingPayload.deserialize(REPORT_ALL)
+    assert rest == b""
+    gpd.emit(GreenPowerCommandReceived.event_type, _report(report))
+    values = {name: e.native_value for name, e in entities.items()}
+    assert values == {
+        "temperature": -5.0, "soil_moisture": 100.0, "illuminance": None,
+        "battery_voltage": 3.0, "battery": 100.0,
+        "humidity": 60.31, "pressure": 1013.0, "soil_temperature": 12.5,
+    }
+
+
+def test_flower_gp_quirk():
+    gpd, entities = _device(COMMISSIONING)
+    assert set(entities) == BASE
 
     report, rest = GPMultiClusterReportingPayload.deserialize(REPORT)
     assert rest == b""
