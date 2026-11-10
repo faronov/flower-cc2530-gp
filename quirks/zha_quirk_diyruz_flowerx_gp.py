@@ -196,7 +196,6 @@ for _sensors in range(4):
             FlowerSoilMoisture,
             unique_id_suffix="soil_moisture",
             fallback_name="Soil moisture",
-            primary=True,
         )
         .adds_entity(
             FlowerTemperature, unique_id_suffix="temperature", fallback_name="Temperature"

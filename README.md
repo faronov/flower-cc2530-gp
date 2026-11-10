@@ -130,6 +130,12 @@ from the same revision (`clang`, `lld`, `llvm-ar`, `llvm-objcopy`; see
 The image is linked with `cc2530-root.ld`. It is LLVM's `cc2530.ld` without
 the code bank sections, so every function stays in the 32-KB common area.
 
+The image has no DATA/IDATA globals, so the build patches the startup to
+`mov sp, #0x47`. The hardware stack then gets IDATA 0x48–0xFF (184 bytes)
+instead of 0x80–0xFF; the deepest path (commissioning → BME280 read) needs
+about 144 bytes. After linking, `tools/stack.py` estimates the worst case
+from the disassembly and fails the build if it does not fit.
+
 ## Measurements
 
 These numbers come from the same GPD logic built inside the full stack image.

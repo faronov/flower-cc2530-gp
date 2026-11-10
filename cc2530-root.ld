@@ -20,8 +20,9 @@ MEMORY
 /* XDATA aliases for registers and the upper 256 bytes of the SRAM. */
 __cc2530_data_alias_start = 0x1f00;
 __cc2530_data_alias_end = 0x2000;
+/* No DATA/IDATA globals: the Makefile starts the hardware stack at 0x48. */
 __cc2530_static_data_start = 0x48;
-__cc2530_static_data_end = 0x80;
+__cc2530_static_data_end = 0x48;
 __cc2530_xreg_start = ORIGIN(XREG);
 __cc2530_xreg_end = ORIGIN(XREG) + LENGTH(XREG);
 __cc2530_sfr_xdata_start = ORIGIN(SFR_XDATA);
