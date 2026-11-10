@@ -128,6 +128,7 @@ static MCU_XDATA gpd_values_t values;
 static MCU_XDATA settings_t settings;
 static MCU_XDATA clock_diagnostics_t clock_diagnostics;
 static MCU_XDATA uint32_t deadline, mark;
+static volatile MCU_XDATA uint16_t polls;
 #define S gpd_status
 #define NOW() timebase_read_awake_ticks24()
 #define SINCE(start) ((NOW()-(start))&TIMEBASE_TICKS_MASK)
@@ -198,6 +199,13 @@ __attribute__((noinline)) MCU_COMMON_CODE static void enter_pm2(void)
 #define SPIN(condition, code) do { mark = NOW(); \
     while (condition) if (SINCE(mark) >= SPIN_WAIT) restart(code); } while (0)
 
+/* Until a positive 32-kHz edge after a PM2 wake the Sleep Timer still reads
+ * its value from before the sleep (SWRU191F 11.4), so a SPIN deadline there
+ * expired at once after a 10 s or 60 s sleep and restarted every report.
+ * These waits are bounded by a poll count instead (as join_smoke). */
+#define POLL(condition, code) do { polls = 0; \
+    while (condition) if (!++polls) restart(code); } while (0)
+
 /* PM2 (or CPU idle) until the Sleep Timer reaches wake (as cc2530-zigbee
  * join_smoke_sleep: compare ST2, ST1, ST0 after STLOAD; after PM2 the XOSC
  * back, then a fresh 32-kHz edge). A wake too close ends in a busy wait; a
@@ -225,9 +233,9 @@ static uint8_t sleep_until(uint32_t wake, uint8_t mode, uint8_t on_button)
         MMIO_WRITE(SOC_SLEEPCMD, SLEEP_IDLE);
         if (mode == SLEEP_PM2) {
             S.stage = 5;
-            SPIN(MMIO_READ(SOC_CLKCONSTA) != MMIO_READ(SOC_CLKCONCMD), 6);
-            SPIN(MMIO_READ(SOC_SLEEPSTA) & 1u, 7);
-            SPIN(!(MMIO_READ(SOC_SLEEPSTA) & 1u), 8);
+            POLL(MMIO_READ(SOC_CLKCONSTA) != MMIO_READ(SOC_CLKCONCMD), 6);
+            POLL(MMIO_READ(SOC_SLEEPSTA) & 1u, 7);
+            POLL(!(MMIO_READ(SOC_SLEEPSTA) & 1u), 8);
         }
     }
 }
