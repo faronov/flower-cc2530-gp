@@ -64,7 +64,8 @@
 #ifndef GPD_REPEAT_GAP
 #define GPD_REPEAT_GAP 655UL
 #endif
-/* SWRS081B Table 2: F5 is +4.5 dBm. */
+/* SWRS081B Table 2: F5 is +4.5 dBm, also the highest setting of the BGT1
+ * vendor firmware's PA table (Z-Stack CC2590 table, 11 dBm). */
 #ifndef GPD_TXPOWER
 #define GPD_TXPOWER 0xf5u
 #endif
@@ -87,11 +88,29 @@
 #define TXDONE 0x02u
 #define FRMFILT0 0x6180u
 #define RXFIFOCNT 0x619bu
+/* SWRU191F 7.12 OBSSELx (EN | rfc_obs_sig0/1), 23.15 RFC_OBS_CTRLx
+ * (inverted pa_pd / lna_pd): the Z-Stack CC2590/CC2591 front end control. */
+#define RFC_OBS_CTRL0 0x61ebu
+#define RFC_OBS_CTRL1 0x61ecu
+#define OBSSEL1 0x6244u
+#define OBSSEL4 0x6247u
+#define PA_PD_INV 0x68u
+#define LNA_PD_INV 0x6au
+#define OBS_SIG0 0xfbu
+#define OBS_SIG1 0xfcu
 /* SWRU191F 7.10 port 2 interrupt: PICTL.P2ICONL falling edge, IEN2.P2IE. */
 #define P2ICONL 0x08u
 #define P2IE 0x02u
 #define SECOND 32768UL
+#if BOARD_PA_LNA
+/* BGT1: DS18B20 supply settling, asleep. */
+#define WARMUP 328UL       /* 10 ms */
+#define WARMUP_MODE SLEEP_PM2
+#else
+/* Soil probe warm-up; the CPU idles because PM2 would stop Timer 3. */
 #define WARMUP 1639UL      /* 50 ms */
+#define WARMUP_MODE SLEEP_IDLE
+#endif
 #define TX_WAIT 164UL      /* 5 ms per GPDF (about 1.6 ms on air) */
 #define LED_ON 655UL       /* 20 ms flash */
 #define BLINK 4915UL       /* 150 ms */
@@ -191,6 +210,16 @@ static void radio_setup(uint8_t channel)
     MMIO_XWRITE(0x6191u, 0x69);   /* TXCTRL */
     MMIO_XWRITE(0x618fu, 11u + 5u*(channel-11u));   /* FREQCTRL */
     MMIO_XWRITE(0x6190u, GPD_TXPOWER);
+#if BOARD_PA_LNA
+    /* PA_EN (P1.1) and LNA_EN (P1.4) follow the radio. The observation
+     * outputs do not survive PM2 (SWRU191F 7.12), so every setup sets them;
+     * without them both pins are the low GPIO outputs of flower_startup:
+     * front end off. */
+    MMIO_XWRITE(RFC_OBS_CTRL0, PA_PD_INV);
+    MMIO_XWRITE(OBSSEL1, OBS_SIG0);
+    MMIO_XWRITE(RFC_OBS_CTRL1, LNA_PD_INV);
+    MMIO_XWRITE(OBSSEL4, OBS_SIG1);
+#endif
 }
 
 /* STIF clear; IEN0 = EA|STIE, then PCON.IDLE whose successor must not start
@@ -264,24 +293,31 @@ static void blink(uint8_t n)
  * the soil temperature. With detect, sensors that answer join S.sensors. */
 static void sample(uint8_t detect)
 {
-    uint8_t bme, ds;
+    uint8_t ds;
+#if BOARD_BME280
+    uint8_t bme;
     int16_t die;
+#endif
     uint32_t started;
     S.stage = 2;
     flower_power(1);
-    nap(WARMUP, SLEEP_IDLE);
+    nap(WARMUP, WARMUP_MODE);
     if (detect) S.sensors |= sensors_detect();
+#if BOARD_BME280
     bme = (S.sensors & GPD_HAS_BME280) && bme280_start();
+#endif
     ds = (S.sensors & GPD_HAS_DS18B20) && ds18b20_start();
     started = NOW();
     flower_measure(&values);
     values.humidity = FLOWER_INVALID_U16;
     values.pressure = values.soil_temperature = (int16_t)FLOWER_INVALID_S16;
+#if BOARD_BME280
     if (bme) {
         die = values.temperature;
         bme280_read(&values);
         if (values.temperature == (int16_t)FLOWER_INVALID_S16) values.temperature = die;
     }
+#endif
     flower_excitation_off();
     if (loads) flower_battery(&values, loaded / loads);
     if (ds) {

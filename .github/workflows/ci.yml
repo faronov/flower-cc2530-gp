@@ -88,19 +88,28 @@ jobs:
 
       - name: Build firmware
         run: |
-          make firmware LLVM_TOOLS="$GITHUB_WORKSPACE/llvm-build/bin" LLVM_SRC="$GITHUB_WORKSPACE/llvm"
-          cd build/firmware
-          sha256sum flower-gp.hex flower-gp.elf > SHA256SUMS
-          python3 ../../tools/size.py flower-gp.hex | tee -a "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          for board in flower bgt1; do
+            make firmware BOARD="$board" LLVM_TOOLS="$GITHUB_WORKSPACE/llvm-build/bin" LLVM_SRC="$GITHUB_WORKSPACE/llvm"
+          done
+          mkdir -p dist
+          cp build/firmware/flower-gp.{hex,elf,map} build/bgt1/bgt1-gp.{hex,elf,map} dist/
+          cd dist
+          sha256sum flower-gp.hex flower-gp.elf bgt1-gp.hex bgt1-gp.elf > SHA256SUMS
+          python3 ../tools/size.py flower-gp.hex | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 ../tools/size.py bgt1-gp.hex | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flower-cc2530-gp
           path: |
-            build/firmware/flower-gp.hex
-            build/firmware/flower-gp.elf
-            build/firmware/flower-gp.map
-            build/firmware/SHA256SUMS
+            dist/flower-gp.hex
+            dist/flower-gp.elf
+            dist/flower-gp.map
+            dist/bgt1-gp.hex
+            dist/bgt1-gp.elf
+            dist/bgt1-gp.map
+            dist/SHA256SUMS
 
   release:
     name: Release
@@ -121,4 +130,5 @@ jobs:
         run: |
           cp quirks/zha_quirk_diyruz_flowerx_gp.py dist/
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes \
-            dist/flower-gp.hex dist/flower-gp.elf dist/SHA256SUMS dist/zha_quirk_diyruz_flowerx_gp.py
+            dist/flower-gp.hex dist/flower-gp.elf dist/bgt1-gp.hex dist/bgt1-gp.elf \
+            dist/SHA256SUMS dist/zha_quirk_diyruz_flowerx_gp.py

@@ -19,6 +19,9 @@ REPORT = bytes.fromhex(
 # The same frames with a BME280 and a DS18B20 (model 0xF103).
 COMMISSIONING_ALL = bytes.fromhex("33450b6b6d03f106010000040204080405040304")
 REPORT_ALL = REPORT + bytes.fromhex("05040000218f170304000029f5030204005029e204")
+# tests/test_gpd_frame.c with BOARD_BGT1 (model 0xF202).
+BGT1_COMMISSIONING = bytes.fromhex("30450b6b6d02f20201000204")
+BGT1_REPORT = bytes.fromhex("02040000290cfe01002000201e0100210020c8")
 BASE = {"soil_moisture", "temperature", "illuminance", "battery", "battery_voltage"}
 
 
@@ -29,7 +32,7 @@ def _report(command):
     )
 
 
-def _device(frame):
+def _device(frame, name="DIYRuZ FlowerX GP"):
     commissioning, rest = GPCommissioningPayload.deserialize(frame)
     assert rest == b""
     gpd = GreenPowerDevice(
@@ -41,7 +44,7 @@ def _device(frame):
     entry = DEVICE_REGISTRY.match_green_power_entry(gpd)
     assert entry is not None
     zha_device = entry.zha_device_factory(DEVICE_REGISTRY.resolve(gpd), MagicMock())
-    assert zha_device.name == "DIYRuZ FlowerX GP"
+    assert zha_device.name == name
     entities = {e.unique_id.rsplit("-", 1)[1]: e for e in zha_device.discover_entities()}
     for entity in entities.values():
         entity.on_add()
@@ -99,3 +102,16 @@ def test_flower_gp_quirk():
 
     gpd.emit(GreenPowerCommandReceived.event_type, _report(None))
     assert entities["illuminance"].native_value == 1.0
+
+
+@pytest.mark.parametrize("model", [0xF200, 0xF202])
+def test_bgt1_gp_quirk(model):
+    frame = bytearray(BGT1_COMMISSIONING)
+    frame[5:7] = model.to_bytes(2, "little")
+    gpd, entities = _device(bytes(frame), "EfektaLab BGT1 GP")
+    assert set(entities) == {"temperature", "battery", "battery_voltage"}
+    report, rest = GPMultiClusterReportingPayload.deserialize(BGT1_REPORT)
+    assert rest == b""
+    gpd.emit(GreenPowerCommandReceived.event_type, _report(report))
+    values = {name: e.native_value for name, e in entities.items()}
+    assert values == {"temperature": -5.0, "battery_voltage": 3.0, "battery": 100.0}

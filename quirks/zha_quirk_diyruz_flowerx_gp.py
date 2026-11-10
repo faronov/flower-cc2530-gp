@@ -6,6 +6,10 @@ Multi-Cluster Reporting (0xA2) frames carrying the ZCL MeasuredValue encodings o
 regular FlowerX firmware. A BME280 adds humidity (0x0405) and pressure (0x0403, hPa);
 a DS18B20 alone replaces the chip temperature; next to a BME280 it adds the soil
 temperature as 0x0402 attribute 0x5000.
+
+The EfektaLab BGT1 build (bgt1-gp) commissions with DeviceID 0x30 (TemperatureSensor),
+the same manufacturer and model 0xF200 | sensors (bit 1: DS18B20) and reports the
+DS18B20 temperature and the battery only.
 Copy to <HA config>/custom_zha_quirks/ (requires ZHA with Green Power support).
 """
 
@@ -31,6 +35,7 @@ FLOWER_GP_MANUFACTURER_ID = 0x6D6B
 FLOWER_GP_MODEL_ID = 0xF100
 FLOWER_GP_HAS_BME280 = 0x01
 FLOWER_GP_HAS_DS18B20 = 0x02
+BGT1_GP_MODEL_ID = 0xF200
 
 
 class FlowerGreenPowerSensor(BaseSensor):
@@ -225,3 +230,24 @@ for _sensors in range(4):
             fallback_name="Soil temperature",
         )
     _quirk.friendly_name(manufacturer="DIYRuZ", model="FlowerX GP").add_to_registry()
+
+for _sensors in (0, FLOWER_GP_HAS_DS18B20):
+    (
+        GreenPowerQuirkBuilder()
+        .applies_to(
+            device_id=DeviceID.TemperatureSensor,
+            manufacturer_id=FLOWER_GP_MANUFACTURER_ID,
+            model_id=BGT1_GP_MODEL_ID | _sensors,
+        )
+        .adds_entity(
+            FlowerTemperature, unique_id_suffix="temperature", fallback_name="Temperature"
+        )
+        .adds_entity(FlowerBattery, unique_id_suffix="battery", fallback_name="Battery")
+        .adds_entity(
+            FlowerBatteryVoltage,
+            unique_id_suffix="battery_voltage",
+            fallback_name="Battery voltage",
+        )
+        .friendly_name(manufacturer="EfektaLab", model="BGT1 GP")
+        .add_to_registry()
+    )

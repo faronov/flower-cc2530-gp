@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2026, cc2530-zigbee contributors. See LICENSE.
  */
-/* The Green Power frames of the FlowerX GP prototype (include/gpd_frame.h)
+/* The Green Power frames of the FlowerX GP prototype, or with BOARD_BGT1 of
+ * the BGT1 one (include/gpd_frame.h)
  * against hand-assembled bytes (Zigbee Green Power Basic: MAC header, NWK
  * frame control 0x0C, SrcID, command, payload). With an argument, prints the
  * frames as hex for an external parser cross-check. */
@@ -36,6 +37,21 @@ static void humidity_negative(bme280_calib_t *c)
 int main(int argc, char **argv)
 {
     static const uint8_t ieee[8] = {0x15, 0x28, 0xf6, 0x0e, 0x00, 0x4b, 0x12, 0x00};
+#ifdef BOARD_BGT1
+    /* TemperatureSensor 0x30, model F202 (DS18B20), Power Configuration and
+     * Temperature Measurement; temperature and battery records only. */
+    static const uint8_t commissioning[] = {
+        0x01, 0x08, 0x42, 0xff, 0xff, 0xff, 0xff, 0x0c, 0x15, 0x28, 0xf6, 0x0e, 0xe0,
+        0x30, 0x45, 0x0b, 0x6b, 0x6d, 0x02, 0xf2, 0x02,
+        0x01, 0x00, 0x02, 0x04
+    };
+    static const uint8_t report[] = {
+        0x01, 0x08, 0x43, 0xff, 0xff, 0xff, 0xff, 0x0c, 0x15, 0x28, 0xf6, 0x0e, 0xa2,
+        0x02, 0x04, 0x00, 0x00, 0x29, 0x0c, 0xfe,
+        0x01, 0x00, 0x20, 0x00, 0x20, 0x1e,
+        0x01, 0x00, 0x21, 0x00, 0x20, 0xc8
+    };
+#else
     static const uint8_t commissioning[] = {
         0x01, 0x08, 0x42, 0xff, 0xff, 0xff, 0xff, 0x0c, 0x15, 0x28, 0xf6, 0x0e, 0xe0,
         0x33, 0x45, 0x0b, 0x6b, 0x6d, 0x00, 0xf1, 0x04,
@@ -59,6 +75,7 @@ int main(int argc, char **argv)
         0x03, 0x04, 0x00, 0x00, 0x29, 0xf5, 0x03,
         0x02, 0x04, 0x00, 0x50, 0x29, 0xe2, 0x04
     };
+#endif
     /* Maintenance Channel Requests announcing channel 15 (0b0100 twice). */
     static const uint8_t request_more[] = {0x01, 0x08, 0x45, 0xff, 0xff, 0xff, 0xff, 0x4d, 0xe3, 0x44};
     static const uint8_t request_last[] = {0x01, 0x08, 0x46, 0xff, 0xff, 0xff, 0xff, 0x0d, 0xe3, 0xff};
@@ -101,6 +118,21 @@ int main(int argc, char **argv)
     high[3] = 0xfe; high[0] = 0xff; gpd_source(src, high); CHECK(src[0] == 0xff);
 
     gpd_source(src, ieee);
+#ifdef BOARD_BGT1
+    memset(f, 0xaa, sizeof(f));
+    n = gpd_commissioning(f, 0x42, src, GPD_HAS_DS18B20);
+    CHECK(n == sizeof(commissioning));
+    CHECK(!memcmp(f, commissioning, n) && f[n] == 0xaa);
+    if (argc > 1) hex("commissioning", f, n);
+    memset(f, 0xaa, sizeof(f));
+    n = gpd_report(f, 0x43, src, &v, GPD_HAS_DS18B20);
+    CHECK(n == sizeof(report));
+    CHECK(!memcmp(f, report, n) && f[n] == 0xaa);
+    if (argc > 1) hex("report", f, n);
+    /* Without the DS18B20: model F200, the same clusters. */
+    n = gpd_commissioning(f, 0x42, src, 0);
+    CHECK(n == sizeof(commissioning) && f[18] == 0x00 && !memcmp(f + 19, commissioning + 19, n - 19u));
+#else
     memset(f, 0xaa, sizeof(f));
     n = gpd_commissioning(f, 0x42, src, 0);
     CHECK(n == sizeof(commissioning));
@@ -129,6 +161,7 @@ int main(int argc, char **argv)
     /* A DS18B20 alone is the air temperature: no attribute 0x5000. */
     n = gpd_report(f, 0x43, src, &v, GPD_HAS_DS18B20);
     CHECK(n == sizeof(report) && !memcmp(f, report, n));
+#endif
     /* PSDU with the FCS within aMaxPHYPacketSize. */
     CHECK(GPD_REPORT_LENGTH + 2u <= 127u);
 
