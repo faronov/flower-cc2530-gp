@@ -49,5 +49,9 @@ void flower_power(uint8_t on);
 void flower_excitation_off(void);
 /* One measurement into v (the rail must have warmed up). */
 void flower_measure(gpd_values_t MCU_XDATA *v);
+/* One raw VDD/3 conversion (internal reference), FLOWER_INVALID_U16 on a fault. */
+uint16_t flower_vdd(void);
+/* Battery voltage and percentage of v from a raw VDD/3 average. */
+void flower_battery(gpd_values_t MCU_XDATA *v, uint16_t raw);
 
 #endif

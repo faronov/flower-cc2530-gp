@@ -129,6 +129,10 @@ static MCU_XDATA settings_t settings;
 static MCU_XDATA clock_diagnostics_t clock_diagnostics;
 static MCU_XDATA uint32_t deadline, mark;
 static volatile MCU_XDATA uint16_t polls;
+/* Sum of the raw VDD/3 readings taken at the end of each of the last
+ * report's transmissions, and their count. */
+static MCU_XDATA uint16_t loaded;
+static MCU_XDATA uint8_t loading, loads;
 #define S gpd_status
 #define NOW() timebase_read_awake_ticks24()
 #define SINCE(start) ((NOW()-(start))&TIMEBASE_TICKS_MASK)
@@ -279,6 +283,7 @@ static void sample(uint8_t detect)
         if (values.temperature == (int16_t)FLOWER_INVALID_S16) values.temperature = die;
     }
     flower_excitation_off();
+    if (loads) flower_battery(&values, loaded / loads);
     if (ds) {
         (void)sleep_until((started + DS18B20_CONVERSION) & TIMEBASE_TICKS_MASK, SLEEP_PM2, 0);
         ds18b20_read(&values);
@@ -295,6 +300,7 @@ static void sample(uint8_t detect)
  * sends without CCA), TXDONE, radio off. */
 static void transmit(uint8_t length)
 {
+    uint16_t vdd, last = FLOWER_INVALID_U16;
     uint8_t i;
     MMIO_WRITE(SOC_RFST, RFST_ISFLUSHTX);
     MMIO_WRITE(SOC_RFD, length + 2u);
@@ -302,10 +308,22 @@ static void transmit(uint8_t length)
     MMIO_WRITE(SOC_RFIRQF1, (uint8_t)~TXDONE);
     MMIO_WRITE(SOC_RFST, RFST_ISTXON);
     mark = NOW();
-    while (!(MMIO_READ(SOC_RFIRQF1) & TXDONE))
+    /* With the bulk capacitor VDD sags most at the end of the frame: keep
+     * the last VDD conversion (about 0.13 ms) that ends before TXDONE. */
+    while (!(MMIO_READ(SOC_RFIRQF1) & TXDONE)) {
         if (SINCE(mark) >= TX_WAIT) break;
-    if (MMIO_READ(SOC_RFIRQF1) & TXDONE) S.sent++;
-    else S.lost++;
+        if (loading) {
+            vdd = flower_vdd();
+            if (!(MMIO_READ(SOC_RFIRQF1) & TXDONE)) last = vdd;
+        }
+    }
+    if (MMIO_READ(SOC_RFIRQF1) & TXDONE) {
+        S.sent++;
+        if (last <= FLOWER_ADC_MAX) {
+            loaded += last;
+            loads++;
+        }
+    } else S.lost++;
     MMIO_WRITE(SOC_RFIRQF1, (uint8_t)~TXDONE);
     MMIO_WRITE(SOC_RFST, RFST_ISRFOFF);
 }
@@ -383,10 +401,16 @@ static uint8_t search(uint8_t hint)
     return 0;
 }
 
+/* The battery is also read at the end of the report's transmissions; their
+ * average (VDD under TX load) becomes the next report's battery. */
 static void report(void)
 {
     radio_setup(S.channel);
+    loaded = 0;
+    loads = 0;
+    loading = 1;
     send(gpd_report(frame, S.seq, S.src, &values, S.sensors));
+    loading = 0;
 }
 
 /* Rounds of search, then commissioning and a report; the channel found is

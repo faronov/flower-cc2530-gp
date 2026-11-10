@@ -12,7 +12,10 @@ Power proxy or sink, such as ZHA with the bundled quirk, receives it.
   submodule. Only the stack's clock and Sleep Timer helpers are linked.
 - Measurement: the same as [flower-cc2530](https://github.com/faronov/flower-cc2530):
   soil probe (Timer 3, 4 MHz), photo resistor, chip temperature, and battery
-  voltage (2 × AAA alkaline curve).
+  voltage. The battery (CR2032 with a 220 µF capacitor) is read at the end
+  of the report's transmissions and reported in the next one; the percentage
+  is an approximate curve for that TX load, with 0 % at 2.0 V. The first report after a start uses the
+  idle voltage.
 - Optional sensors, detected at every start: a BME280 (I²C, SCL P0.5,
   SDA P0.6) for air temperature, humidity and pressure, and a DS18B20
   (1-Wire, P1.3): the air temperature alone, the soil temperature next to

@@ -78,15 +78,20 @@ static uint16_t adc(uint8_t command, uint8_t n)
     return (uint16_t)(sum / n);
 }
 
-/* flower battery.c Alkaline 2S curve, 0.5 % units. */
+/* CR2032 with 220 uF across it, at the end of a ~1.9 ms, 34 mA TX burst over
+ * 7 mA, 0.5 % units. Model: the 0.5 mA discharge curve and the mean internal
+ * resistance R, read by eye from the figures in Ganssle's "Ultra-low power
+ * design" report, sag R*(7 mA + 27 mA*(1-exp(-t/RC))). 0 % is 2.0 V, reached
+ * with about 12 % of the cell left; approximate. */
 static uint8_t percent(uint16_t mv)
 {
     uint16_t p;
-    if (mv >= 3000u) p = 100;
-    else if (mv > 2800u) p = 80u + (mv-2800u)*20u/200u;
-    else if (mv > 2500u) p = 40u + (mv-2500u)*40u/300u;
-    else if (mv > 2200u) p = 10u + (mv-2200u)*30u/300u;
-    else if (mv > 2000u) p = (mv-2000u)*10u/200u;
+    if (mv >= 2700u) p = 100;
+    else if (mv > 2640u) p = 71u + (mv-2640u)*29u/60u;
+    else if (mv > 2570u) p = 42u + (mv-2570u)*29u/70u;
+    else if (mv > 2480u) p = 28u + (mv-2480u)*14u/90u;
+    else if (mv > 2330u) p = 14u + (mv-2330u)*14u/150u;
+    else if (mv > 2000u) p = (mv-2000u)*14u/330u;
     else p = 0;
     return (uint8_t)(p*2u);
 }
@@ -143,25 +148,36 @@ static int16_t chip(uint16_t battery)
     return FLOWER_DIE_CENTI(die, FLOWER_MILLIVOLTS(battery), factory);
 }
 
+uint16_t flower_vdd(void)
+{
+    return adc(0x3fu, 1);
+}
+
+void flower_battery(gpd_values_t MCU_XDATA *v, uint16_t raw)
+{
+    uint16_t mv;
+    if (raw > FLOWER_ADC_MAX) {
+        v->voltage = v->percent = 0xffu;
+        return;
+    }
+    mv = FLOWER_MILLIVOLTS(raw);
+    v->voltage = (uint8_t)((mv+50u)/100u);
+    v->percent = percent(mv);
+}
+
 /* Battery (VDD/3, internal reference), the die sensor, then illuminance and
  * soil (AVDD reference) like flower's APP_PHASE_ADC; the soil curve uses the
  * battery raw ADC. */
 void flower_measure(gpd_values_t MCU_XDATA *v)
 {
-    uint16_t battery, light, soil, mv;
+    uint16_t battery, light, soil;
     MMIO_SET(SOC_APCFG, BOARD_FLOWER_SOIL | BOARD_FLOWER_LIGHT);
     battery = adc(0x3fu, 5);
     v->temperature = chip(battery);
     light = adc(0xb7u, 5);
     soil = adc(0xb4u, 3);
     MMIO_CLEAR(SOC_APCFG, BOARD_FLOWER_SOIL | BOARD_FLOWER_LIGHT);
-    if (battery > FLOWER_ADC_MAX) {
-        v->voltage = v->percent = 0xffu;
-    } else {
-        mv = FLOWER_MILLIVOLTS(battery);
-        v->voltage = (uint8_t)((mv+50u)/100u);
-        v->percent = percent(mv);
-    }
+    flower_battery(v, battery);
     v->soil = moisture(soil, battery);
     v->illuminance = illuminance(light);
 }
