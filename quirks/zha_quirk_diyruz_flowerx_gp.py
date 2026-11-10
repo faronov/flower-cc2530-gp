@@ -4,7 +4,8 @@ The GPD commissions with DeviceID 0x33 (IndoorEnvironmentSensor), manufacturer 0
 and model 0xF100 | sensors (bit 0: BME280, bit 1: DS18B20), then sends unsecured
 Multi-Cluster Reporting (0xA2) frames carrying the ZCL MeasuredValue encodings of the
 regular FlowerX firmware. A BME280 adds humidity (0x0405) and pressure (0x0403, hPa);
-a DS18B20 adds the soil temperature as 0x0402 attribute 0x5000.
+a DS18B20 alone replaces the chip temperature; next to a BME280 it adds the soil
+temperature as 0x0402 attribute 0x5000.
 Copy to <HA config>/custom_zha_quirks/ (requires ZHA with Green Power support).
 """
 
@@ -217,7 +218,7 @@ for _sensors in range(4):
         ).adds_entity(
             FlowerPressure, unique_id_suffix="pressure", fallback_name="Pressure"
         )
-    if _sensors & FLOWER_GP_HAS_DS18B20:
+    if _sensors == FLOWER_GP_HAS_BME280 | FLOWER_GP_HAS_DS18B20:
         _quirk.adds_entity(
             FlowerSoilTemperature,
             unique_id_suffix="soil_temperature",

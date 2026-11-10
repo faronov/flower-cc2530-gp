@@ -15,7 +15,8 @@ Power proxy or sink, such as ZHA with the bundled quirk, receives it.
   voltage (2 × AAA alkaline curve).
 - Optional sensors, detected at every start: a BME280 (I²C, SCL P0.5,
   SDA P0.6) for air temperature, humidity and pressure, and a DS18B20
-  (1-Wire, P1.3) for soil temperature.
+  (1-Wire, P1.3): the air temperature alone, the soil temperature next to
+  a BME280.
 
 ## Radio protocol
 
@@ -29,13 +30,13 @@ Power proxy or sink, such as ZHA with the bundled quirk, receives it.
 - Reports: a Multi-Cluster Reporting frame (0xA2) every 60 s
   (`GPD_INTERVAL`). It carries the following values, all in their ZCL
   encodings:
-  - temperature (0x0402), from the BME280 if present, else the chip
-    sensor;
+  - temperature (0x0402), from the BME280 if present, else the DS18B20,
+    else the chip sensor (uncalibrated, ±10 °C per SWRS081B);
   - soil moisture (0x0408);
   - illuminance (0x0400);
   - battery voltage (0x0001/0x0020) and battery remaining (0x0001/0x0021);
   - with a BME280: humidity (0x0405) and pressure (0x0403, hPa);
-  - with a DS18B20: soil temperature (0x0402, attribute 0x5000).
+  - with a BME280 and a DS18B20: soil temperature (0x0402, attribute 0x5000).
 - Repeats and sleep: each GPDF is sent 3 times, 20 ms apart, with PM2
   between repetitions and between rounds. The CPU idles instead of sleeping
   during the 50-ms probe warm-up, because PM2 would stop Timer 3, which

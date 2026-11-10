@@ -53,7 +53,7 @@ def _device(frame):
     ("model", "extra"),
     [
         (0xF101, {"humidity", "pressure"}),
-        (0xF102, {"soil_temperature"}),
+        (0xF102, set()),
     ],
 )
 def test_flower_gp_variants(model, extra):

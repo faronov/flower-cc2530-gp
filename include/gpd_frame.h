@@ -49,8 +49,11 @@
 #define GPD_HAS_DS18B20 0x02u
 #define GPD_COMMISSIONING_LENGTH (GPD_HEADER + 1u + 20u)
 #define GPD_REPORT_LENGTH (GPD_HEADER + 1u + 54u)
-/* DS18B20 soil temperature: a manufacturer-specific Temperature Measurement
- * attribute (ZCL r8 2.6.1.3 range 0x5000..0xEFFF), int16 0.01 C. */
+/* DS18B20 next to a BME280: soil temperature, a manufacturer-specific
+ * Temperature Measurement attribute (ZCL r8 2.6.1.3 range 0x5000..0xEFFF),
+ * int16 0.01 C. A DS18B20 alone is the air temperature (0x0402/0000). */
+#define GPD_HAS_SOIL_TEMPERATURE(sensors) \
+    (((sensors) & (GPD_HAS_BME280 | GPD_HAS_DS18B20)) == (GPD_HAS_BME280 | GPD_HAS_DS18B20))
 #define GPD_SOIL_TEMPERATURE 0x5000u
 
 typedef struct {
@@ -174,7 +177,7 @@ __attribute__((unused)) static uint8_t gpd_report(uint8_t MCU_XDATA *f, uint8_t 
         n = gpd_record(f, n, 0x0405u, 0x00u, 0x21u, v->humidity);
         n = gpd_record(f, n, 0x0403u, 0x00u, 0x29u, (uint16_t)v->pressure);
     }
-    if (sensors & GPD_HAS_DS18B20)
+    if (GPD_HAS_SOIL_TEMPERATURE(sensors))
         n = gpd_record(f, n, 0x0402u, GPD_SOIL_TEMPERATURE, 0x29u, (uint16_t)v->soil_temperature);
     return n;
 }

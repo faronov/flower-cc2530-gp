@@ -126,8 +126,9 @@ int main(int argc, char **argv)
     CHECK(!memcmp(f, report, sizeof(report)) && !memcmp(f + sizeof(report), extra, sizeof(extra)));
     CHECK(f[n] == 0xaa);
     if (argc > 1) hex("report-all", f, n);
+    /* A DS18B20 alone is the air temperature: no attribute 0x5000. */
     n = gpd_report(f, 0x43, src, &v, GPD_HAS_DS18B20);
-    CHECK(n == sizeof(report) + 7u && !memcmp(f + sizeof(report), extra + 14, 7));
+    CHECK(n == sizeof(report) && !memcmp(f, report, n));
     /* PSDU with the FCS within aMaxPHYPacketSize. */
     CHECK(GPD_REPORT_LENGTH + 2u <= 127u);
 

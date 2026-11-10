@@ -246,9 +246,10 @@ static void blink(uint8_t n)
 }
 
 /* Rail on and warmed up (CPU idle: Timer 3 drives the soil probe), sensor
- * conversions started, ADC, BME280 result (its temperature replaces the
- * die's), excitation off, PM2 until the DS18B20 conversion is done, rail
- * off. With detect, sensors that answer join S.sensors. */
+ * conversions started, ADC, BME280 result, excitation off, PM2 until the
+ * DS18B20 conversion is done, rail off. A valid BME280 temperature, else a
+ * valid DS18B20 one, replaces the die's; next to a BME280 the DS18B20 is
+ * the soil temperature. With detect, sensors that answer join S.sensors. */
 static void sample(uint8_t detect)
 {
     uint8_t bme, ds;
@@ -273,6 +274,11 @@ static void sample(uint8_t detect)
     if (ds) {
         (void)sleep_until((started + DS18B20_CONVERSION) & TIMEBASE_TICKS_MASK, SLEEP_PM2, 0);
         ds18b20_read(&values);
+        if (!GPD_HAS_SOIL_TEMPERATURE(S.sensors)) {
+            if (values.soil_temperature != (int16_t)FLOWER_INVALID_S16)
+                values.temperature = values.soil_temperature;
+            values.soil_temperature = (int16_t)FLOWER_INVALID_S16;
+        }
     }
     flower_power(0);
 }
