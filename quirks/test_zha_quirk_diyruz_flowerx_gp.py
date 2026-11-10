@@ -80,6 +80,9 @@ def test_flower_gp_quirk_all_sensors():
 def test_flower_gp_quirk():
     gpd, entities = _device(COMMISSIONING)
     assert set(entities) == BASE
+    soil = entities["soil_moisture"]
+    assert soil.translation_key == "soil_moisture"
+    assert not soil.primary
 
     report, rest = GPMultiClusterReportingPayload.deserialize(REPORT)
     assert rest == b""

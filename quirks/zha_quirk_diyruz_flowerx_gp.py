@@ -195,6 +195,7 @@ for _sensors in range(4):
         .adds_entity(
             FlowerSoilMoisture,
             unique_id_suffix="soil_moisture",
+            translation_key="soil_moisture",
             fallback_name="Soil moisture",
         )
         .adds_entity(
