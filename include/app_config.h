@@ -30,6 +30,13 @@
 #define CC2530_APP_REGISTER_LIST(X) \
     X(SOC_T3CTL, 0xcb) \
     X(SOC_T3CC0, 0xcd) \
-    X(SOC_T3CCTL1, 0xce)
+    X(SOC_T3CCTL1, 0xce) \
+    X(SOC_T1CNTL, 0xe2) \
+    X(SOC_T1CNTH, 0xe3) \
+    X(SOC_T1CTL, 0xe4) \
+    X(SOC_P2IFG, 0x8b) \
+    X(SOC_P2IEN, 0xac) \
+    X(SOC_PICTL, 0x8c) \
+    X(SOC_IRCON2, 0xe8)
 
 #endif

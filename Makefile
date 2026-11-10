@@ -3,6 +3,7 @@
 # stack) built with LLVM MCS-51; clock and Sleep Timer helpers from the
 # cc2530-zigbee submodule.
 .DEFAULT_GOAL := test
+.DELETE_ON_ERROR:
 STACK := cc2530-zigbee
 PYTHON ?= python3
 LLVM_TOOLS ?= ../llvm-mcs51-build/bin
@@ -16,7 +17,7 @@ TARGET := -target mcs51 -mcpu=cc2530
 CFLAGS_FW := $(TARGET) -std=c99 -Os -Wall -ffunction-sections -fdata-sections \
 	-I$(STACK)/toolchain/clang/include -Iinclude -I$(STACK)/include \
 	-DCC2530_BOARD=2 -DCC2530_APP $(GPD_DEFINES)
-SOURCES := src/gpd_main.c src/flower.c $(STACK)/src/clock.c $(STACK)/src/timebase.c
+SOURCES := src/gpd_main.c src/flower.c src/sensors.c src/settings.c $(STACK)/src/clock.c $(STACK)/src/timebase.c
 OBJECTS := $(patsubst %.c,$(OUT)/obj/%.o,$(notdir $(SOURCES)))
 HEADERS := $(wildcard include/*.h)
 
@@ -45,9 +46,15 @@ $(OUT)/rt/mcs51/libmcs51builtins.a: $(RT)/mcs51-runtime.c
 		-c $< -o $(@D)/mcs51-runtime.o
 	rm -f $@ && $(LLVM_TOOLS)/llvm-ar rcs $@ $(@D)/mcs51-runtime.o
 
+# The upstream startup sets SP to 0x7f (stack 0x80-0xff). This image has no
+# DATA/IDATA globals, so the stack starts right after the IM registers
+# (0x30-0x47) instead: 184 bytes. cc2530-root.ld keeps DATA globals below it.
+STACK_SP := 0x47
 $(OUT)/rt/mcs51/cc2530_startup.o: $(RT)/cc2530_startup.s
 	mkdir -p $(@D)
-	$(LLVM_TOOLS)/clang $(TARGET) -c $< -o $@
+	grep -q '^  mov sp, #127$$' $<
+	sed 's/^  mov sp, #127$$/  mov sp, #$(STACK_SP)/' $< > $(@D)/cc2530_startup.s
+	$(LLVM_TOOLS)/clang $(TARGET) -c $(@D)/cc2530_startup.s -o $@
 
 $(OUT)/obj/%.o: src/%.c $(HEADERS) | $(STACK)/include/clock.h
 	mkdir -p $(@D)
@@ -66,6 +73,8 @@ $(OUT)/flower-gp.elf: cc2530-root.ld $(OBJECTS) $(OUT)/rt/mcs51/cc2530_startup.o
 $(OUT)/flower-gp.hex: $(OUT)/flower-gp.elf
 	$(LLVM_TOOLS)/llvm-objcopy --output-target=ihex $< $@
 	$(PYTHON) tools/size.py $@
+	$(LLVM_TOOLS)/llvm-objdump -d --no-show-raw-insn $< > $(OUT)/flower-gp.dis
+	$(PYTHON) tools/stack.py $(OUT)/flower-gp.dis $(STACK_SP) gpd_sleep_isr gpd_button_isr
 
 clean:
 	rm -rf build
