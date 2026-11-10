@@ -18,8 +18,8 @@ Power proxy or sink, such as ZHA with the bundled quirk, receives it.
   idle voltage.
 - Optional sensors, detected at every start: a BME280 (I²C, SCL P0.5,
   SDA P0.6) for air temperature, humidity and pressure, and a DS18B20
-  (1-Wire, P1.3): the air temperature alone, the soil temperature next to
-  a BME280.
+  (1-Wire, P1.3, 10 bits, 0.25 °C steps): the air temperature alone, the
+  soil temperature next to a BME280.
 
 The same image is also built for the EfektaLab BGT1 board (`BOARD=bgt1`,
 `bgt1-gp.hex`), see [EfektaLab BGT1](#efektalab-bgt1).
@@ -117,8 +117,9 @@ pin map was read from its original Z-Stack firmware:
   CC2590, more with a CC2591). Which of the two is fitted is not known.
 - Commissioning: DeviceID 0x30 (TemperatureSensor), manufacturer 0x6D6B,
   model `0xF200 | sensors` (bit 1 DS18B20), server clusters 0x0001 and
-  0x0402. Reports carry the DS18B20 temperature (invalid without it; no
-  chip-sensor fallback), battery voltage and battery remaining.
+  0x0402. Reports carry the DS18B20 temperature (11 bits, 0.125 °C steps,
+  375 ms conversion; invalid without it, no chip-sensor fallback), battery
+  voltage and battery remaining.
 - Battery: 0 % at 2.0 V, 100 % from 2.9 V, a rough piecewise curve for two
   alkaline AAA cells; approximate.
 - Button, LED, channel search and settings work as on the FlowerX.

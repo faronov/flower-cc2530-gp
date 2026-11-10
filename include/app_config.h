@@ -30,6 +30,7 @@
 #define BOARD_BME280 0
 #define BOARD_ONEWIRE_PORT SOC_P0
 #define BOARD_ONEWIRE_DIR SOC_P0DIR
+#define BOARD_DS18B20_BITS 11
 
 #define CC2530_APP_REGISTER_LIST(X) \
     X(SOC_T1CNTL, 0xe2) \
@@ -62,6 +63,7 @@
 #define BOARD_BME280 1
 #define BOARD_ONEWIRE_PORT SOC_P1
 #define BOARD_ONEWIRE_DIR SOC_P1DIR
+#define BOARD_DS18B20_BITS 10
 
 /* Timer 3 drives the soil excitation. */
 #define CC2530_APP_REGISTER_LIST(X) \

@@ -19,7 +19,6 @@
  * values instead, so stale (85 C power-on) data is rejected. */
 #define DS_TH 0x00u
 #define DS_TL 0x64u
-#define DS_CONFIG_10BIT 0x3fu
 /* SWRU191F 7.18 P2INP.PDUP0: port 0 pull-down. */
 #define PDUP0 0x20u
 /* One expansion level so BOARD_ONEWIRE_PORT becomes the register name
@@ -310,7 +309,7 @@ uint8_t ds18b20_start(void)
     uint8_t busy;
     if (!ow_reset()) return 0;
     ow_byte(OW_SKIP_ROM); ow_byte(OW_WRITE);
-    ow_byte(DS_TH); ow_byte(DS_TL); ow_byte(DS_CONFIG_10BIT);
+    ow_byte(DS_TH); ow_byte(DS_TL); ow_byte(DS18B20_CONFIG);
     if (!ow_reset()) return 0;
     ow_byte(OW_SKIP_ROM); ow_byte(OW_CONVERT);
     /* An externally powered DS18B20 reads 0 while converting. */
@@ -329,9 +328,9 @@ void ds18b20_read(gpd_values_t MCU_XDATA *v)
     for (i = 0; i < 9u; i++) buf[i] = ow_byte(0xffu);
     ow_release();
     if (onewire_crc8(buf, 8) != buf[8] || buf[2] != DS_TH || buf[3] != DS_TL ||
-        buf[4] != DS_CONFIG_10BIT)
+        buf[4] != DS18B20_CONFIG)
         return;
-    raw = (int16_t)((uint16_t)buf[1] << 8 | (buf[0] & 0xfcu));
+    raw = (int16_t)((uint16_t)buf[1] << 8 | (buf[0] & DS18B20_MASK));
     if (raw < -55*16 || raw > 125*16) return;
     v->soil_temperature = (int16_t)(((int32_t)raw * 25) / 4);
 }
