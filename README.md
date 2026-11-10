@@ -122,10 +122,13 @@ pin map was read from its original Z-Stack firmware:
 - Battery: 0 % at 2.0 V, 100 % from 2.9 V, a rough piecewise curve for two
   alkaline AAA cells; approximate.
 - Button, LED, channel search and settings work as on the FlowerX.
+- ZHA: its own quirk, `quirks/zha_quirk_efektalab_bgt1_gp.py` ("EfektaLab
+  BGT1 GP").
 
 ## Pairing with ZHA
 
-1. Copy `quirks/zha_quirk_diyruz_flowerx_gp.py` (FlowerX and BGT1) to
+1. Copy `quirks/zha_quirk_diyruz_flowerx_gp.py` (or, for BGT1,
+   `quirks/zha_quirk_efektalab_bgt1_gp.py`) to
    `<HA config>/custom_zha_quirks/` and restart Home Assistant. This needs a
    ZHA build with Green Power support.
 2. Permit joining.
@@ -190,7 +193,7 @@ calibrated against a reference load:
 
 Pushing a `v*` tag builds the firmware in CI. The workflow then publishes
 `flower-gp.hex`, `flower-gp.elf`, `bgt1-gp.hex`, `bgt1-gp.elf`, `SHA256SUMS`
-and the ZHA quirk as a GitHub release.
+and both ZHA quirks as a GitHub release.
 
 ## License
 

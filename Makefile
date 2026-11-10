@@ -51,7 +51,7 @@ test:
 
 # ZHA quirk against zha and zha-quirks (pip install zha zha-quirks pytest).
 test-quirk:
-	cd quirks && $(PYTHON) -m pytest -q test_zha_quirk_diyruz_flowerx_gp.py
+	cd quirks && $(PYTHON) -m pytest -q test_zha_quirk_diyruz_flowerx_gp.py test_zha_quirk_efektalab_bgt1_gp.py
 
 # Intel HEX in $(OUT)/$(IMAGE).hex.
 firmware: $(OUT)/$(IMAGE).hex
