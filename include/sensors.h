@@ -26,6 +26,10 @@
 #else
 #error "BOARD_DS18B20_BITS must be 10 or 11"
 #endif
+/* Clones may convert slower than tCONV at any resolution (a Mysentech-type
+ * chip ~500 ms, reading 25 C until done): polled every 50 ms up to 1 s. */
+#define DS18B20_POLL 1638UL         /* Sleep Timer ticks, 50 ms */
+#define DS18B20_TIMEOUT 32768UL     /* Sleep Timer ticks, 1 s */
 
 /* Rail on and warmed up: which sensors answer. */
 uint8_t sensors_detect(void);
@@ -37,6 +41,8 @@ void bme280_read(gpd_values_t MCU_XDATA *v);
 #endif
 /* Configures BOARD_DS18B20_BITS and starts a DS18B20 conversion; 0 on error. */
 uint8_t ds18b20_start(void);
+/* 1 while the started conversion runs. */
+uint8_t ds18b20_busy(void);
 /* Reads the conversion into v->soil_temperature (invalid on error). */
 void ds18b20_read(gpd_values_t MCU_XDATA *v);
 /* Sensor bus pins: pull-ups with the rail on, no pulls with it off. */

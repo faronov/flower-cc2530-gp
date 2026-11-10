@@ -306,14 +306,18 @@ void bme280_read(gpd_values_t MCU_XDATA *v)
 
 uint8_t ds18b20_start(void)
 {
-    uint8_t busy;
     if (!ow_reset()) return 0;
     ow_byte(OW_SKIP_ROM); ow_byte(OW_WRITE);
     ow_byte(DS_TH); ow_byte(DS_TL); ow_byte(DS18B20_CONFIG);
     if (!ow_reset()) return 0;
     ow_byte(OW_SKIP_ROM); ow_byte(OW_CONVERT);
-    /* An externally powered DS18B20 reads 0 while converting. */
-    busy = !ow_bit(1);
+    return ds18b20_busy();
+}
+
+/* An externally powered DS18B20 reads 0 while converting. */
+uint8_t ds18b20_busy(void)
+{
+    uint8_t busy = !ow_bit(1);
     ow_release();
     return busy;
 }
