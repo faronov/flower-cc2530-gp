@@ -31,7 +31,10 @@ TARGET := -target mcs51 -mcpu=cc2530
 CFLAGS_FW := $(TARGET) -std=c99 -Os -Wall -ffunction-sections -fdata-sections \
 	-I$(STACK)/toolchain/clang/include -Iinclude -I$(STACK)/include \
 	-DCC2530_BOARD=2 -DCC2530_APP $(BOARD_DEFINES) $(GPD_DEFINES)
-SOURCES := src/gpd_main.c $(BOARD_SOURCE) src/sensors.c src/settings.c $(STACK)/src/clock.c $(STACK)/src/timebase.c
+# aes.c: the lean hardware AES block (GP security; dropped by --gc-sections
+# with GPD_DEFINES=-DGPD_SECURITY=0).
+SOURCES := src/gpd_main.c $(BOARD_SOURCE) src/sensors.c src/settings.c $(STACK)/src/clock.c $(STACK)/src/timebase.c \
+	$(STACK)/src/aes.c
 OBJECTS := $(patsubst %.c,$(OUT)/obj/%.o,$(notdir $(SOURCES)))
 HEADERS := $(wildcard include/*.h)
 
@@ -42,12 +45,20 @@ $(STACK)/include/clock.h:
 
 # Green Power frame builder (include/gpd_frame.h) for both boards, ASan/UBSan.
 HOST_CFLAGS := -std=c99 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -Iinclude
-test:
+# With GPD_SECURITY the CCM* frames against zigpy's vectors, AES from the
+# stack's host-only FIPS 197 reference (its main renamed).
+AES_REFERENCE := $(STACK)/tests/aes_reference.c
+test: | $(STACK)/include/clock.h
 	mkdir -p build/host
-	$(CC) $(HOST_CFLAGS) tests/test_gpd_frame.c -o build/host/test-gpd-frame
-	$(CC) $(HOST_CFLAGS) -DBOARD_BGT1 tests/test_gpd_frame.c -o build/host/test-gpd-frame-bgt1
+	$(CC) $(HOST_CFLAGS) -I$(STACK)/tests -I$(STACK)/include -DCC2530_HOST_TEST -Dmain=aes_reference_main -c $(AES_REFERENCE) -o build/host/aes_reference.o
+	$(CC) $(HOST_CFLAGS) -I$(STACK)/tests tests/test_gpd_frame.c build/host/aes_reference.o -o build/host/test-gpd-frame
+	$(CC) $(HOST_CFLAGS) -I$(STACK)/tests -DBOARD_BGT1 tests/test_gpd_frame.c build/host/aes_reference.o -o build/host/test-gpd-frame-bgt1
+	$(CC) $(HOST_CFLAGS) -DGPD_SECURITY=0 tests/test_gpd_frame.c -o build/host/test-gpd-frame-open
+	$(CC) $(HOST_CFLAGS) -DGPD_SECURITY=0 -DBOARD_BGT1 tests/test_gpd_frame.c -o build/host/test-gpd-frame-bgt1-open
 	build/host/test-gpd-frame
 	build/host/test-gpd-frame-bgt1
+	build/host/test-gpd-frame-open
+	build/host/test-gpd-frame-bgt1-open
 
 # ZHA quirk against zha and zha-quirks (pip install zha zha-quirks pytest).
 test-quirk:
@@ -78,7 +89,7 @@ $(OUT)/obj/%.o: src/%.c $(HEADERS) | $(STACK)/include/clock.h
 
 $(OUT)/obj/%.o: $(STACK)/src/%.c | $(STACK)/include/clock.h
 	mkdir -p $(@D)
-	$(LLVM_TOOLS)/clang $(CFLAGS_FW) -c $< -o $@
+	$(LLVM_TOOLS)/clang $(CFLAGS_FW) -DCC2530_LEAN -I$(STACK)/src -c $< -o $@
 
 $(OUT)/$(IMAGE).elf: cc2530-root.ld $(OBJECTS) $(OUT)/rt/mcs51/cc2530_startup.o $(OUT)/rt/mcs51/libmcs51builtins.a
 	$(LLVM_TOOLS)/clang $(TARGET) -Os -nostartfiles $(OUT)/rt/mcs51/cc2530_startup.o \

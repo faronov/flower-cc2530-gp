@@ -26,8 +26,8 @@ The same image is also built for the EfektaLab BGT1 board (`BOARD=bgt1`,
 
 ## Radio protocol
 
-- Frame type: Green Power Device Frames, ApplicationID 0 (SrcID), **no
-  security**, unidirectional. The MAC sequence number is the frame counter.
+- Frame type: Green Power Device Frames, ApplicationID 0 (SrcID),
+  unidirectional, security level 3 (see Security).
 - SrcID: the low 32 bits of the chip IEEE address, avoiding the reserved
   values.
 - Commissioning frame (0xE0): DeviceID 0x33, manufacturer 0x6D6B, model
@@ -90,11 +90,32 @@ LED (P0.1) signals:
 - 3 blinks: the channel was not found (the hint channel is used);
 - 5 blinks: decommissioned.
 
+### Security
+
+Reports and Decommissioning are sent at GP security level 3 (encrypted,
+4-byte MIC, AES-CCM* on the CC2530 AES coprocessor) with an individual
+out-of-the-box key (KeyType 4). Channel Requests are unprotected, as the
+specification requires.
+
+- Key: 16 random bytes, made on the first commissioning from the radio's
+  random bits (RFRND, receiver on) and whitened with AES. It survives
+  recommissioning and goes on Decommissioning (a 10-s press) or a chip erase.
+  The sink then sees a new key and the device must be paired again.
+- Commissioning frame: the key is sent encrypted with the ZigBee
+  Alliance default TC link key (`ZigBeeAlliance09`) with its MIC, plus the
+  outgoing frame counter, as Zigbee2MQTT (zigbee-herdsman) and ZHA (zigpy)
+  expect.
+- Frame counter: 32 bits, never reused for a given key. Flash holds a lease of
+  1024 counter values; each reboot starts at the next lease.
+- Firmware that starts without a key (for example after an upgrade without a
+  chip erase) commissions again.
+- `GPD_DEFINES=-DGPD_SECURITY=0` builds the unsecured variant.
+
 ### Settings
 
-The channel and the sensor set are kept in flash page 125 (0x3E800), as a
-log of 4-byte records written by DMA. A chip erase (`cc-tool -e`) therefore
-means a first start.
+The channel, the sensor set, the key and the frame-counter lease are kept in
+flash page 125 (0x3E800), as a log of 4-byte records written by DMA. A chip
+erase (`cc-tool -e`) therefore means a first start and a new key.
 
 ## EfektaLab BGT1
 
@@ -132,10 +153,9 @@ pin map was read from its original Z-Stack firmware:
 - Zigbee2MQTT: external converter `z2m/efektalab_bgt1_gp.mjs`. Copy it to
   `<z2m data>/external_converters/` and restart Zigbee2MQTT. zigbee-herdsman
   names the device `GreenPower_48` after its DeviceID, so the converter
-  matches any Green Power TemperatureSensor. Not tested with a live
-  Zigbee2MQTT: zigbee-herdsman pairs a GPD without RxOnCapability at
-  security level 2, while this firmware sends unsecured frames, which a
-  proxy or the coordinator's GP stack may drop.
+  matches any Green Power TemperatureSensor. Tested against
+  zigbee-herdsman's parsing and decryption of this firmware's frames, not
+  with a live Zigbee2MQTT.
 
 ## Pairing with ZHA
 

@@ -2,8 +2,17 @@
  * Copyright (c) 2026, cc2530-zigbee contributors. See LICENSE.
  */
 /* FlowerX Green Power Device. No Zigbee join, no stack runtime (only the
- * cc2530-zigbee clock and Sleep Timer helpers): GPDFs (include/gpd_frame.h,
- * NoSecurity, unidirectional commissioning) on one channel.
+ * cc2530-zigbee clock, Sleep Timer and AES helpers): GPDFs
+ * (include/gpd_frame.h, unidirectional commissioning) on one channel.
+ *
+ * Security (GPD_SECURITY, default): SecurityLevel 3 with an individual key,
+ * generated from radio noise on the first commissioning and kept in flash
+ * until a decommissioning or a chip erase. The Commissioning GPDF carries
+ * it protected with the default TC link key, as the ZHA (zigpy) and
+ * Zigbee2MQTT (zigbee-herdsman) sinks expect; every other GPDF but the
+ * Channel Requests is encrypted and authenticated with it. The security
+ * frame counter never repeats: flash holds a lease of 1024 counters, taken
+ * before its first counter is used, and a restart continues after it.
  *
  * Channel: with no saved channel (first start), a changed sensor set or a
  * 3-s button press the device commissions: each of up to
@@ -34,6 +43,9 @@
 #include "settings.h"
 #include "clock.h"
 #include "timebase.h"
+#if GPD_SECURITY
+#include "aes.h"
+#endif
 
 /* The hint: the channel searched first and used when no proxy answers. */
 #ifndef GPD_CHANNEL
@@ -88,6 +100,13 @@
 #define TXDONE 0x02u
 #define FRMFILT0 0x6180u
 #define RXFIFOCNT 0x619bu
+/* SWRU191F 23.12, 23.15: RSSISTAT.RSSI_VALID, RFRND.IRND. */
+#define RSSISTAT 0x6199u
+#define RFRND 0x61a7u
+#define FREQCTRL 0x618fu
+/* One AES block: about 10 us; generous bounds, a failure restarts. */
+#define AES_WAIT 328UL     /* 10 ms */
+#define AES_POLLS 4000u
 /* SWRU191F 7.12 OBSSELx (EN | rfc_obs_sig0/1), 23.15 RFC_OBS_CTRLx
  * (inverted pa_pd / lna_pd): the Z-Stack CC2590/CC2591 front end control. */
 #define RFC_OBS_CTRL0 0x61ebu
@@ -141,7 +160,7 @@ typedef struct {
 } gpd_status_t;
 MCU_XDATA gpd_status_t gpd_status;
 
-static MCU_XDATA uint8_t frame[GPD_REPORT_LENGTH], ieee[8], rx[128];
+static MCU_XDATA uint8_t frame[GPD_REPORT_LENGTH + GPD_SECURITY_OVERHEAD], ieee[8], rx[128];
 static MCU_XDATA uint8_t paired, armed;
 static MCU_XDATA gpd_values_t values;
 static MCU_XDATA settings_t settings;
@@ -156,6 +175,11 @@ static MCU_XDATA uint8_t loading, loads;
 /* The temperature last reported and the intervals since. */
 static MCU_XDATA int16_t reported;
 static MCU_XDATA uint8_t quiet;
+#endif
+#if GPD_SECURITY
+/* The next security frame counter. */
+static MCU_XDATA uint32_t counter;
+static MCU_XDATA aes_diagnostics_t aes_diagnostics;
 #endif
 #define S gpd_status
 #define NOW() timebase_read_awake_ticks24()
@@ -243,6 +267,54 @@ __attribute__((noinline)) MCU_COMMON_CODE static void enter_pm2(void)
  * These waits are bounded by a poll count instead (as join_smoke). */
 #define POLL(condition, code) do { polls = 0; \
     while (condition) if (!++polls) restart(code); } while (0)
+
+#if GPD_SECURITY
+/* Interrupts are off outside sleep_until (IEN0 = 0). */
+void gpd_aes(const uint8_t MCU_XDATA *key, uint8_t MCU_XDATA *block)
+{
+    if (aes128_encrypt_block((const MCU_GENERIC uint8_t *)key, (const MCU_GENERIC uint8_t *)block, block,
+                             AES_WAIT, AES_POLLS, &aes_diagnostics) != AES_OK)
+        restart(10);
+}
+
+/* A security frame counter, the lease extended in flash first. */
+static uint32_t take(void)
+{
+    if ((uint16_t)(counter >> 10) >= settings.lease) {
+        settings.lease = (uint16_t)((counter >> 10) + 1u);
+        settings_save(&settings);
+    }
+    return counter++;
+}
+
+/* A new key (SWRU191F 23.12): receiver on below the band (FREQCTRL 0, as
+ * the guide's procedure) until RSSI is valid, 1024 RFRND.IRND bits XORed
+ * into 16 bytes, which then key AES over the IEEE address and Sleep Timer
+ * as a whitening step. */
+static void generate_key(void)
+{
+    uint16_t i;
+    uint8_t MCU_XDATA *pool = rx, MCU_XDATA *block = rx + 16;
+    radio_setup(GPD_CHANNEL);
+    MMIO_XWRITE(FREQCTRL, 0);
+    for (i = 0; i < 32u; i++) rx[i] = 0;
+    MMIO_WRITE(SOC_RFST, RFST_ISRXON);
+    SPIN(!(MMIO_XREAD(RSSISTAT) & 1u), 9);
+    for (i = 0; i < 1024u; i++)
+        pool[(i >> 3) & 15u] ^= (uint8_t)((MMIO_XREAD(RFRND) & 1u) << (i & 7u));
+    MMIO_WRITE(SOC_RFST, RFST_ISRFOFF);
+    for (i = 0; i < 8u; i++) block[i] = ieee[i];
+    block[8] = MMIO_READ(SOC_ST0); block[9] = MMIO_READ(SOC_ST1); block[10] = MMIO_READ(SOC_ST2);
+    block[11] = S.seq;
+    gpd_aes(pool, block);
+    for (i = 0; i < 16u; i++) settings.key[i] = block[i];
+    settings.keyed = 0xffu;
+    settings_save(&settings);
+}
+#define SECURE(n) gpd_secure(frame, (n), settings.key, take())
+#else
+#define SECURE(n) (n)
+#endif
 
 /* PM2 (or CPU idle) until the Sleep Timer reaches wake (as cc2530-zigbee
  * join_smoke_sleep: compare ST2, ST1, ST0 after STLOAD; after PM2 the XOSC
@@ -455,7 +527,7 @@ static void report(void)
     loaded = 0;
     loads = 0;
     loading = 1;
-    send(gpd_report(frame, S.seq, S.src, &values, S.sensors));
+    send(SECURE(gpd_report(frame, S.seq, S.src, &values, S.sensors)));
     loading = 0;
 #ifdef BOARD_HEARTBEAT
     reported = values.temperature;
@@ -468,6 +540,9 @@ static void report(void)
 static void commission(void)
 {
     uint8_t hint = settings.channel ? settings.channel : GPD_CHANNEL, found = 0;
+#if GPD_SECURITY
+    if (settings.keyed != 0xffu) generate_key();
+#endif
     sample(1);
     for (S.rounds = 0; S.rounds < GPD_COMMISSION_ROUNDS && !found; ) {
         S.rounds++;
@@ -476,7 +551,11 @@ static void commission(void)
         S.channel = found ? found : hint;
         radio_setup(S.channel);
         led(1);
+#if GPD_SECURITY
+        send(gpd_commissioning(frame, S.seq, S.src, S.sensors, settings.key, take()));
+#else
         send(gpd_commissioning(frame, S.seq, S.src, S.sensors));
+#endif
         nap(GPD_REPEAT_GAP, SLEEP_PM2);
         report();
         led(0);
@@ -498,9 +577,14 @@ static void commission(void)
 static void decommission(void)
 {
     radio_setup(S.channel);
-    send(gpd_decommissioning(frame, S.seq, S.src));
+    send(SECURE(gpd_decommissioning(frame, S.seq, S.src)));
     settings_clear();
     settings.channel = settings.sensors = 0;
+#if GPD_SECURITY
+    /* The key goes; the counters stay used. */
+    settings.keyed = 0;
+    settings_save(&settings);
+#endif
     S.sensors = 0;
     paired = 0;
     blink(5);
@@ -550,10 +634,17 @@ void main(void)
     gpd_source(S.src, ieee);
     S.seq = (uint8_t)(ieee[0] ^ MMIO_READ(SOC_ST0));
     settings_load(&settings);
+#if GPD_SECURITY
+    counter = (uint32_t)settings.lease << 10;
+#endif
     S.sensors = settings.sensors;
     S.channel = settings.channel ? settings.channel : GPD_CHANNEL;
     sample(1);
+#if GPD_SECURITY
+    if (!settings.channel || S.sensors != settings.sensors || settings.keyed != 0xffu) {
+#else
     if (!settings.channel || S.sensors != settings.sensors) {
+#endif
         commission();
     } else {
         paired = 1;

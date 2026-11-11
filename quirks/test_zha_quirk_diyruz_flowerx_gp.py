@@ -11,13 +11,19 @@ from zigpy.zgp.types import ApplicationID, GPDCommandID, SrcID
 
 import zha_quirk_diyruz_flowerx_gp  # noqa: F401  registers the quirk
 
-# tests/test_gpd_frame.c frames for IEEE 00:12:4b:00:0e:f6:28:15, after byte 13.
-COMMISSIONING = bytes.fromhex("33450b6b6d00f1040100000402040804")
+# tests/test_gpd_frame.c frames for IEEE 00:12:4b:00:0e:f6:28:15, after byte 13
+# (commissioning: extended options, the protected key and its MIC, outgoing
+# counter 0x400).
+COMMISSIONING = bytes.fromhex(
+    "33c5f3474e69a9d4de1369fc7fcd93b0a1d9faf712d507000400000b6b6d00f1040100000402040804"
+)
 REPORT = bytes.fromhex(
     "02040000290cfe080400002110270004000021ffff01002000201e0100210020c8"
 )
 # The same frames with a BME280 and a DS18B20 (model 0xF103).
-COMMISSIONING_ALL = bytes.fromhex("33450b6b6d03f106010000040204080405040304")
+COMMISSIONING_ALL = bytes.fromhex(
+    "33c5f3474e69a9d4de1369fc7fcd93b0a1d9faf712d507000400000b6b6d03f106010000040204080405040304"
+)
 REPORT_ALL = REPORT + bytes.fromhex("05040000218f170304000029f5030204005029e204")
 BASE = {"soil_moisture", "temperature", "illuminance", "battery", "battery_voltage"}
 
@@ -58,7 +64,7 @@ def _device(frame):
 )
 def test_flower_gp_variants(model, extra):
     frame = bytearray(COMMISSIONING)
-    frame[5:7] = model.to_bytes(2, "little")
+    frame[30:32] = model.to_bytes(2, "little")
     _, entities = _device(bytes(frame))
     assert set(entities) == BASE | extra
 

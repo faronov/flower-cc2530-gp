@@ -1,14 +1,16 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2026, cc2530-zigbee contributors. See LICENSE.
  */
-/* Green Power Device frames (Zigbee Green Power Basic, NoSecurity) for the
- * FlowerX and BGT1 GP prototypes (BOARD_BGT1): an IEEE 802.15.4 data frame
- * to PAN/short FFFF with no source address and no ACK request, then the
- * GPDF: NWK frame control
- * 0x0C (data frame, protocol version 3, Application ID 0, no extension),
- * the 4-byte SrcID, the command ID and its payload. The radio appends the
- * FCS (AUTOCRC). Both builders return the frame length without the FCS.
- * The includer defines MCU_XDATA. */
+/* Green Power Device frames (Zigbee Green Power) for the FlowerX and BGT1
+ * GP prototypes (BOARD_BGT1): an IEEE 802.15.4 data frame to PAN/short FFFF
+ * with no source address and no ACK request, then the GPDF: NWK frame
+ * control 0x0C (data frame, protocol version 3, Application ID 0, no
+ * extension), the 4-byte SrcID, the command ID and its payload. The radio
+ * appends the FCS (AUTOCRC). The builders return the frame length without
+ * the FCS. With GPD_SECURITY (default) gpd_secure turns such a frame into
+ * a SecurityLevel 3 one (individual key) and the Commissioning GPDF carries
+ * the key. The includer defines MCU_XDATA and, with GPD_SECURITY,
+ * gpd_aes. */
 #ifndef GPD_FRAME_H
 #define GPD_FRAME_H
 
@@ -31,9 +33,9 @@
 #define GPD_DECOMMISSIONING_LENGTH (GPD_HEADER + 1u)
 /* Commissioning: IndoorEnvironmentSensor (FlowerX) or TemperatureSensor
  * (BGT1), MAC sequence number capability, application information present,
- * fixed location; unidirectional (no RX after TX), no extended options so
- * no security. Application information: manufacturer ID, model ID and the
- * server cluster list. GPD_SOIL_LIGHT: soil moisture and illuminance. */
+ * fixed location; unidirectional (no RX after TX). Application
+ * information: manufacturer ID, model ID and the server cluster list.
+ * GPD_SOIL_LIGHT: soil moisture and illuminance. */
 #ifdef BOARD_BGT1
 #define GPD_DEVICE_ID 0x30u
 #define GPD_SOIL_LIGHT 0
@@ -46,7 +48,18 @@
 #define GPD_SOIL_LIGHT 1
 #define GPD_SERVER_CLUSTERS 4u
 #endif
+#ifndef GPD_SECURITY
+#define GPD_SECURITY 1
+#endif
+#if GPD_SECURITY
+/* Extended options present; extended options (A.4.2.1.1.3): SecurityLevel
+ * capabilities 3, KeyType 4 (individual out-of-the-box GPD key), key
+ * present, key encrypted (with its MIC), outgoing counter present. */
+#define GPD_OPTIONS 0xc5u
+#define GPD_EXTENDED_OPTIONS 0xf3u
+#else
 #define GPD_OPTIONS 0x45u
+#endif
 #define GPD_APP_INFO 0x0bu
 #ifndef GPD_MANUFACTURER
 /* Not an assigned Zigbee manufacturer code: a prototype value the
@@ -60,8 +73,17 @@
  * so the sink's quirk knows which values come. */
 #define GPD_HAS_BME280 0x01u
 #define GPD_HAS_DS18B20 0x02u
+#if GPD_SECURITY
+/* Extended options, key, key MIC, outgoing counter; extended NWK frame
+ * control, security frame counter, MIC. */
+#define GPD_COMMISSIONING_LENGTH (GPD_HEADER + 1u + 20u + 25u)
+#define GPD_SECURITY_OVERHEAD 9u
+#else
 #define GPD_COMMISSIONING_LENGTH (GPD_HEADER + 1u + 20u)
+#define GPD_SECURITY_OVERHEAD 0u
+#endif
 #define GPD_REPORT_LENGTH (GPD_HEADER + 1u + 54u)
+#define GPD_DECOMMISSIONING_SECURED (GPD_DECOMMISSIONING_LENGTH + GPD_SECURITY_OVERHEAD)
 /* DS18B20 next to a BME280: soil temperature, a manufacturer-specific
  * Temperature Measurement attribute (ZCL r8 2.6.1.3 range 0x5000..0xEFFF),
  * int16 0.01 C. A DS18B20 alone is the air temperature (0x0402/0000). */
@@ -116,11 +138,101 @@ static uint8_t gpd_header(uint8_t MCU_XDATA *f, uint8_t seq, const uint8_t MCU_X
     return GPD_HEADER + 1u;
 }
 
+#if GPD_SECURITY
+#ifndef MCU_CODE
+#define MCU_CODE
+#endif
+/* block = AES-128(key, block), in place (FIPS 197). */
+void gpd_aes(const uint8_t MCU_XDATA *key, uint8_t MCU_XDATA *block);
+
+/* The default Trust Center link key "ZigBeeAlliance09" protects the GPD
+ * key in the Commissioning GPDF (A.3.7.1.2.3). */
+static const MCU_CODE uint8_t gpd_tclk[16] = {
+    0x5a, 0x69, 0x67, 0x42, 0x65, 0x65, 0x41, 0x6c, 0x6c, 0x69, 0x61, 0x6e, 0x63, 0x65, 0x30, 0x39
+};
+static MCU_XDATA uint8_t gpd_mac[16], gpd_ctr[16], gpd_link[16];
+
+/* flags | nonce | 0 | tail, the nonce (A.1.5.4.1) SrcID | SrcID | fc | 05. */
+static void gpd_nonce(uint8_t MCU_XDATA *b, uint8_t flags, const uint8_t MCU_XDATA *src,
+                      const uint8_t MCU_XDATA *fc, uint8_t tail)
+{
+    uint8_t i;
+    b[0] = flags;
+    for (i = 0; i < 4u; i++) { b[1u+i] = src[i]; b[5u+i] = src[i]; b[9u+i] = fc[i]; }
+    b[13] = 0x05; b[14] = 0; b[15] = tail;
+}
+
+/* CCM* (IEEE 802.15.4 B.4, A.1.5.4) with a 4-byte MIC and a 2-byte length:
+ * authenticates a (alen <= 14) and m, encrypts m (len) in place and
+ * appends the MIC. */
+static void gpd_ccm(const uint8_t MCU_XDATA *key, const uint8_t MCU_XDATA *src, const uint8_t MCU_XDATA *fc,
+                    const uint8_t MCU_XDATA *a, uint8_t alen, uint8_t MCU_XDATA *m, uint8_t len)
+{
+    uint8_t i;
+    gpd_nonce(gpd_mac, 0x49, src, fc, len);
+    gpd_aes(key, gpd_mac);
+    gpd_mac[1] ^= alen;
+    for (i = 0; i < alen; i++) gpd_mac[2u+i] ^= a[i];
+    gpd_aes(key, gpd_mac);
+    for (i = 0; i < len; i++) {
+        gpd_mac[i & 15u] ^= m[i];
+        if ((i & 15u) == 15u || i + 1u == len) gpd_aes(key, gpd_mac);
+    }
+    for (i = 0; i < len; i++) {
+        if (!(i & 15u)) {
+            gpd_nonce(gpd_ctr, 0x01, src, fc, (uint8_t)((i >> 4) + 1u));
+            gpd_aes(key, gpd_ctr);
+        }
+        m[i] ^= gpd_ctr[i & 15u];
+    }
+    gpd_nonce(gpd_ctr, 0x01, src, fc, 0);
+    gpd_aes(key, gpd_ctr);
+    for (i = 0; i < 4u; i++) m[len+i] = (uint8_t)(gpd_mac[i] ^ gpd_ctr[i]);
+}
+
+/* A frame of the builders below (n bytes) to SecurityLevel 3 with the
+ * individual key (A.1.4.1, A.1.5.4.3.3): NWK frame control with the
+ * extension bit, extended frame control 0x38 (Application ID 0, level 3,
+ * individual key, GPD to GPP), SrcID, the security frame counter, then the
+ * encrypted command and payload and the MIC, authenticated over the NWK
+ * header. The new length (n + GPD_SECURITY_OVERHEAD). */
+__attribute__((unused)) static uint8_t gpd_secure(uint8_t MCU_XDATA *f, uint8_t n, const uint8_t MCU_XDATA *key,
+                                                  uint32_t counter)
+{
+    uint8_t i;
+    for (i = n; i > GPD_HEADER; i--) f[i + 4u] = f[i - 1u];
+    for (i = GPD_HEADER; i > 8u; i--) f[i] = f[i - 1u];
+    f[7] = 0x8c; f[8] = 0x38;
+    for (i = 0; i < 4u; i++) { f[13u+i] = (uint8_t)counter; counter >>= 8; }
+    gpd_ccm(key, f + 9, f + 13, f + 7, 10, f + 17, (uint8_t)(n - GPD_HEADER));
+    return (uint8_t)(n + GPD_SECURITY_OVERHEAD);
+}
+#endif
+
+/* With GPD_SECURITY the key (protected with gpd_tclk, nonce SrcID | SrcID |
+ * SrcID, the SrcID authenticated) and counter, the security frame counter
+ * the next secured GPDF exceeds. */
+#if GPD_SECURITY
+__attribute__((unused)) static uint8_t gpd_commissioning(uint8_t MCU_XDATA *f, uint8_t seq, const uint8_t MCU_XDATA *src,
+                                                         uint8_t sensors, const uint8_t MCU_XDATA *key,
+                                                         uint32_t counter)
+#else
 __attribute__((unused)) static uint8_t gpd_commissioning(uint8_t MCU_XDATA *f, uint8_t seq, const uint8_t MCU_XDATA *src,
                                                          uint8_t sensors)
+#endif
 {
     uint8_t n = gpd_header(f, seq, src, GPD_COMMISSIONING);
+#if GPD_SECURITY
+    uint8_t i;
+    f[n++] = GPD_DEVICE_ID; f[n++] = GPD_OPTIONS; f[n++] = GPD_EXTENDED_OPTIONS;
+    for (i = 0; i < 16u; i++) { f[n+i] = key[i]; gpd_link[i] = gpd_tclk[i]; }
+    gpd_ccm(gpd_link, src, src, src, 4, f + n, 16);
+    n += 20u;
+    for (i = 0; i < 4u; i++) { f[n++] = (uint8_t)counter; counter >>= 8; }
+    f[n++] = GPD_APP_INFO;
+#else
     f[n++] = GPD_DEVICE_ID; f[n++] = GPD_OPTIONS; f[n++] = GPD_APP_INFO;
+#endif
     f[n++] = (uint8_t)GPD_MANUFACTURER; f[n++] = (uint8_t)(GPD_MANUFACTURER >> 8);
     f[n++] = (uint8_t)(GPD_MODEL | sensors); f[n++] = (uint8_t)(GPD_MODEL >> 8);
     f[n++] = (sensors & GPD_HAS_BME280) ? GPD_SERVER_CLUSTERS + 2u : GPD_SERVER_CLUSTERS;

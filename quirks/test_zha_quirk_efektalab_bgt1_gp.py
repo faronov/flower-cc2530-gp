@@ -11,17 +11,21 @@ from zigpy.zgp.types import ApplicationID, GPDCommandID, SrcID
 
 import zha_quirk_efektalab_bgt1_gp  # noqa: F401  registers the quirk
 
-# tests/test_gpd_frame.c with BOARD_BGT1 (model 0xF202), after byte 13.
-COMMISSIONING = bytes.fromhex("30450b6b6d02f20201000204")
+# tests/test_gpd_frame.c with BOARD_BGT1 (model 0xF202), after byte 13:
+# extended options, the protected key and its MIC, outgoing counter 0x400.
+COMMISSIONING = bytes.fromhex(
+    "30c5f3474e69a9d4de1369fc7fcd93b0a1d9faf712d507000400000b6b6d02f20201000204"
+)
 REPORT = bytes.fromhex("02040000290cfe01002000201e0100210020c8")
 
 
 @pytest.mark.parametrize("model", [0xF200, 0xF202])
 def test_bgt1_gp_quirk(model):
     frame = bytearray(COMMISSIONING)
-    frame[5:7] = model.to_bytes(2, "little")
+    frame[30:32] = model.to_bytes(2, "little")
     commissioning, rest = GPCommissioningPayload.deserialize(bytes(frame))
     assert rest == b""
+    assert commissioning.extended_options.key_encrypted
     gpd = GreenPowerDevice(
         MagicMock(), application_id=ApplicationID.SrcID, src_id=SrcID(0x0EF62815)
     )
