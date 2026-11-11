@@ -128,7 +128,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          cp quirks/zha_quirk_diyruz_flowerx_gp.py quirks/zha_quirk_efektalab_bgt1_gp.py dist/
+          cp quirks/zha_quirk_diyruz_flowerx_gp.py quirks/zha_quirk_efektalab_bgt1_gp.py z2m/efektalab_bgt1_gp.mjs dist/
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes \
             dist/flower-gp.hex dist/flower-gp.elf dist/bgt1-gp.hex dist/bgt1-gp.elf \
-            dist/SHA256SUMS dist/zha_quirk_diyruz_flowerx_gp.py dist/zha_quirk_efektalab_bgt1_gp.py
+            dist/SHA256SUMS dist/zha_quirk_diyruz_flowerx_gp.py dist/zha_quirk_efektalab_bgt1_gp.py \
+            dist/efektalab_bgt1_gp.mjs

@@ -122,9 +122,20 @@ pin map was read from its original Z-Stack firmware:
   voltage and battery remaining.
 - Battery: 0 % at 2.0 V, 100 % from 2.9 V, a rough piecewise curve for two
   alkaline AAA cells; approximate.
+- Reports: the sensor wakes every 60 s but transmits only when the
+  temperature moved by 0.25 °C or more from the last report, became valid or
+  invalid, or after 30 minutes without a report (heartbeat). The button and
+  (re)commissioning always report. The battery is sent with these reports.
 - Button, LED, channel search and settings work as on the FlowerX.
 - ZHA: its own quirk, `quirks/zha_quirk_efektalab_bgt1_gp.py` ("EfektaLab
   BGT1 GP").
+- Zigbee2MQTT: external converter `z2m/efektalab_bgt1_gp.mjs`. Copy it to
+  `<z2m data>/external_converters/` and restart Zigbee2MQTT. zigbee-herdsman
+  names the device `GreenPower_48` after its DeviceID, so the converter
+  matches any Green Power TemperatureSensor. Not tested with a live
+  Zigbee2MQTT: zigbee-herdsman pairs a GPD without RxOnCapability at
+  security level 2, while this firmware sends unsecured frames, which a
+  proxy or the coordinator's GP stack may drop.
 
 ## Pairing with ZHA
 
