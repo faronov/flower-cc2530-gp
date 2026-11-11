@@ -80,6 +80,17 @@ typedef struct {
     int16_t soil_temperature; /* 0x0402/5000, 0.01 C, 0x8000 invalid (DS18B20) */
 } gpd_values_t;
 
+/* A temperature (0.01 C, 0x8000 invalid) worth reporting against the last
+ * one sent: validity changed or moved by delta or more. */
+__attribute__((unused)) static uint8_t gpd_temperature_changed(int16_t now, int16_t sent, uint16_t delta)
+{
+    uint16_t diff;
+    if ((now == (int16_t)0x8000) != (sent == (int16_t)0x8000)) return 1;
+    if (now == (int16_t)0x8000) return 0;
+    diff = now > sent ? (uint16_t)now - (uint16_t)sent : (uint16_t)sent - (uint16_t)now;
+    return diff >= delta;
+}
+
 /* SrcID from the low half of the IEEE address (LSB first). 0 and
  * FFFFFFF9..FFFFFFFF are reserved (A.1.4.1.1): 0 becomes 1, the others
  * FFFFFFF1..FFFFFFF7. */

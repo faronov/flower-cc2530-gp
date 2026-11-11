@@ -152,6 +152,11 @@ static volatile MCU_XDATA uint16_t polls;
  * report's transmissions, and their count. */
 static MCU_XDATA uint16_t loaded;
 static MCU_XDATA uint8_t loading, loads;
+#ifdef BOARD_HEARTBEAT
+/* The temperature last reported and the intervals since. */
+static MCU_XDATA int16_t reported;
+static MCU_XDATA uint8_t quiet;
+#endif
 #define S gpd_status
 #define NOW() timebase_read_awake_ticks24()
 #define SINCE(start) ((NOW()-(start))&TIMEBASE_TICKS_MASK)
@@ -452,6 +457,10 @@ static void report(void)
     loading = 1;
     send(gpd_report(frame, S.seq, S.src, &values, S.sensors));
     loading = 0;
+#ifdef BOARD_HEARTBEAT
+    reported = values.temperature;
+    quiet = 0;
+#endif
 }
 
 /* Rounds of search, then commissioning and a report; the channel found is
@@ -558,6 +567,10 @@ void main(void)
         }
         if (paired) {
             sample(0);
+#ifdef BOARD_HEARTBEAT
+            if (gpd_temperature_changed(values.temperature, reported, BOARD_REPORT_DELTA) ||
+                ++quiet >= BOARD_HEARTBEAT)
+#endif
             report();
         }
         deadline = (deadline + (uint32_t)GPD_INTERVAL*SECOND) & TIMEBASE_TICKS_MASK;

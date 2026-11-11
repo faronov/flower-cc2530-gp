@@ -207,6 +207,14 @@ int main(int argc, char **argv)
     humidity_negative(&c);
     CHECK(onewire_crc8(rom, 7) == 0xa2 && onewire_crc8(rom, 8) == 0);
 
+    /* Change-based reporting: 0.25 C from the last sent, or validity. */
+    CHECK(!gpd_temperature_changed(2112, 2100, 25));
+    CHECK(gpd_temperature_changed(2125, 2100, 25) && gpd_temperature_changed(2075, 2100, 25));
+    CHECK(!gpd_temperature_changed(-12, 12, 25) && gpd_temperature_changed(-13, 12, 25));
+    CHECK(gpd_temperature_changed((int16_t)0x8000, 2100, 25) && gpd_temperature_changed(2100, (int16_t)0x8000, 25));
+    CHECK(!gpd_temperature_changed((int16_t)0x8000, (int16_t)0x8000, 25));
+    CHECK(gpd_temperature_changed(12500, -5500, 25));
+
     if (argc <= 1) printf("gpd_frame: %lu checks passed\n", checks);
     return 0;
 }

@@ -31,6 +31,11 @@
 #define BOARD_ONEWIRE_PORT SOC_P0
 #define BOARD_ONEWIRE_DIR SOC_P0DIR
 #define BOARD_DS18B20_BITS 11
+/* A scheduled report only when the temperature moved by BOARD_REPORT_DELTA
+ * (0.01 C: two 11-bit steps) from the last one sent, or its validity
+ * changed, or after BOARD_HEARTBEAT intervals without one (30 min). */
+#define BOARD_REPORT_DELTA 25
+#define BOARD_HEARTBEAT 30u
 
 #define CC2530_APP_REGISTER_LIST(X) \
     X(SOC_T1CNTL, 0xe2) \
