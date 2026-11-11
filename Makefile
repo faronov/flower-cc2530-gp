@@ -8,21 +8,8 @@ STACK := cc2530-zigbee
 PYTHON ?= python3
 LLVM_TOOLS ?= ../llvm-mcs51-build/bin
 LLVM_SRC ?= ../llvm-project
-# flower (FlowerX, flower-gp) or bgt1 (EfektaLab BGT1, bgt1-gp).
-BOARD ?= flower
-ifeq ($(BOARD),flower)
 IMAGE := flower-gp
-BOARD_SOURCE := src/flower.c
-BOARD_DEFINES :=
 OUT ?= build/firmware
-else ifeq ($(BOARD),bgt1)
-IMAGE := bgt1-gp
-BOARD_SOURCE := src/bgt1.c
-BOARD_DEFINES := -DBOARD_BGT1
-OUT ?= build/bgt1
-else
-$(error BOARD must be flower or bgt1)
-endif
 # Extra -D overrides for src/gpd_main.c, e.g. GPD_DEFINES=-DGPD_CHANNEL=20
 GPD_DEFINES ?=
 
@@ -30,10 +17,10 @@ RT := $(LLVM_SRC)/llvm/lib/Target/MCS51
 TARGET := -target mcs51 -mcpu=cc2530
 CFLAGS_FW := $(TARGET) -std=c99 -Os -Wall -ffunction-sections -fdata-sections \
 	-I$(STACK)/toolchain/clang/include -Iinclude -I$(STACK)/include \
-	-DCC2530_BOARD=2 -DCC2530_APP $(BOARD_DEFINES) $(GPD_DEFINES)
+	-DCC2530_BOARD=2 -DCC2530_APP $(GPD_DEFINES)
 # aes.c: the lean hardware AES block (GP security; dropped by --gc-sections
 # with GPD_DEFINES=-DGPD_SECURITY=0).
-SOURCES := src/gpd_main.c $(BOARD_SOURCE) src/sensors.c src/settings.c $(STACK)/src/clock.c $(STACK)/src/timebase.c \
+SOURCES := src/gpd_main.c src/flower.c src/sensors.c src/settings.c $(STACK)/src/clock.c $(STACK)/src/timebase.c \
 	$(STACK)/src/aes.c
 OBJECTS := $(patsubst %.c,$(OUT)/obj/%.o,$(notdir $(SOURCES)))
 HEADERS := $(wildcard include/*.h)
@@ -52,17 +39,13 @@ test: | $(STACK)/include/clock.h
 	mkdir -p build/host
 	$(CC) $(HOST_CFLAGS) -I$(STACK)/tests -I$(STACK)/include -DCC2530_HOST_TEST -Dmain=aes_reference_main -c $(AES_REFERENCE) -o build/host/aes_reference.o
 	$(CC) $(HOST_CFLAGS) -I$(STACK)/tests tests/test_gpd_frame.c build/host/aes_reference.o -o build/host/test-gpd-frame
-	$(CC) $(HOST_CFLAGS) -I$(STACK)/tests -DBOARD_BGT1 tests/test_gpd_frame.c build/host/aes_reference.o -o build/host/test-gpd-frame-bgt1
 	$(CC) $(HOST_CFLAGS) -DGPD_SECURITY=0 tests/test_gpd_frame.c -o build/host/test-gpd-frame-open
-	$(CC) $(HOST_CFLAGS) -DGPD_SECURITY=0 -DBOARD_BGT1 tests/test_gpd_frame.c -o build/host/test-gpd-frame-bgt1-open
 	build/host/test-gpd-frame
-	build/host/test-gpd-frame-bgt1
 	build/host/test-gpd-frame-open
-	build/host/test-gpd-frame-bgt1-open
 
 # ZHA quirk against zha and zha-quirks (pip install zha zha-quirks pytest).
 test-quirk:
-	cd quirks && $(PYTHON) -m pytest -q test_zha_quirk_diyruz_flowerx_gp.py test_zha_quirk_efektalab_bgt1_gp.py
+	cd quirks && $(PYTHON) -m pytest -q test_zha_quirk_diyruz_flowerx_gp.py
 
 # Intel HEX in $(OUT)/$(IMAGE).hex.
 firmware: $(OUT)/$(IMAGE).hex

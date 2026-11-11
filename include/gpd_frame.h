@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2026, cc2530-zigbee contributors. See LICENSE.
  */
-/* Green Power Device frames (Zigbee Green Power) for the FlowerX and BGT1
- * GP prototypes (BOARD_BGT1): an IEEE 802.15.4 data frame to PAN/short FFFF
+/* Green Power Device frames (Zigbee Green Power) for the FlowerX GP
+ * prototype: an IEEE 802.15.4 data frame to PAN/short FFFF
  * with no source address and no ACK request, then the GPDF: NWK frame
  * control 0x0C (data frame, protocol version 3, Application ID 0, no
  * extension), the 4-byte SrcID, the command ID and its payload. The radio
@@ -31,23 +31,12 @@
 #define GPD_MAINTENANCE_MORE 0x4du
 #define GPD_CHANNEL_REQUEST_LENGTH 10u
 #define GPD_DECOMMISSIONING_LENGTH (GPD_HEADER + 1u)
-/* Commissioning: IndoorEnvironmentSensor (FlowerX) or TemperatureSensor
- * (BGT1), MAC sequence number capability, application information present,
- * fixed location; unidirectional (no RX after TX). Application
- * information: manufacturer ID, model ID and the server cluster list.
- * GPD_SOIL_LIGHT: soil moisture and illuminance. */
-#ifdef BOARD_BGT1
-#define GPD_DEVICE_ID 0x30u
-#define GPD_SOIL_LIGHT 0
-#define GPD_SERVER_CLUSTERS 2u
-#ifndef GPD_MODEL
-#define GPD_MODEL 0xf200u
-#endif
-#else
+/* Commissioning: IndoorEnvironmentSensor, MAC sequence number capability,
+ * application information present, fixed location; unidirectional (no RX
+ * after TX). Application information: manufacturer ID, model ID and the
+ * server cluster list. */
 #define GPD_DEVICE_ID 0x33u
-#define GPD_SOIL_LIGHT 1
 #define GPD_SERVER_CLUSTERS 4u
-#endif
 #ifndef GPD_SECURITY
 #define GPD_SECURITY 1
 #endif
@@ -101,17 +90,6 @@ typedef struct {
     int16_t pressure;        /* 0x0403/0000, 0.1 kPa, 0x8000 invalid (BME280) */
     int16_t soil_temperature; /* 0x0402/5000, 0.01 C, 0x8000 invalid (DS18B20) */
 } gpd_values_t;
-
-/* A temperature (0.01 C, 0x8000 invalid) worth reporting against the last
- * one sent: validity changed or moved by delta or more. */
-__attribute__((unused)) static uint8_t gpd_temperature_changed(int16_t now, int16_t sent, uint16_t delta)
-{
-    uint16_t diff;
-    if ((now == (int16_t)0x8000) != (sent == (int16_t)0x8000)) return 1;
-    if (now == (int16_t)0x8000) return 0;
-    diff = now > sent ? (uint16_t)now - (uint16_t)sent : (uint16_t)sent - (uint16_t)now;
-    return diff >= delta;
-}
 
 /* SrcID from the low half of the IEEE address (LSB first). 0 and
  * FFFFFFF9..FFFFFFFF are reserved (A.1.4.1.1): 0 becomes 1, the others
@@ -237,13 +215,9 @@ __attribute__((unused)) static uint8_t gpd_commissioning(uint8_t MCU_XDATA *f, u
     f[n++] = (uint8_t)(GPD_MODEL | sensors); f[n++] = (uint8_t)(GPD_MODEL >> 8);
     f[n++] = (sensors & GPD_HAS_BME280) ? GPD_SERVER_CLUSTERS + 2u : GPD_SERVER_CLUSTERS;
     f[n++] = 0x01; f[n++] = 0x00;   /* Power Configuration */
-#if GPD_SOIL_LIGHT
     f[n++] = 0x00; f[n++] = 0x04;   /* Illuminance Measurement */
-#endif
     f[n++] = 0x02; f[n++] = 0x04;   /* Temperature Measurement */
-#if GPD_SOIL_LIGHT
     f[n++] = 0x08; f[n++] = 0x04;   /* Soil Moisture */
-#endif
     if (sensors & GPD_HAS_BME280) {
         f[n++] = 0x05; f[n++] = 0x04;   /* Relative Humidity Measurement */
         f[n++] = 0x03; f[n++] = 0x04;   /* Pressure Measurement */
@@ -309,10 +283,8 @@ __attribute__((unused)) static uint8_t gpd_report(uint8_t MCU_XDATA *f, uint8_t 
 {
     uint8_t n = gpd_header(f, seq, src, GPD_MULTI_REPORT);
     n = gpd_record(f, n, 0x0402u, 0x00u, 0x29u, (uint16_t)v->temperature);
-#if GPD_SOIL_LIGHT
     n = gpd_record(f, n, 0x0408u, 0x00u, 0x21u, v->soil);
     n = gpd_record(f, n, 0x0400u, 0x00u, 0x21u, v->illuminance);
-#endif
     n = gpd_record(f, n, 0x0001u, 0x20u, 0x20u, v->voltage);
     n = gpd_record(f, n, 0x0001u, 0x21u, 0x20u, v->percent);
     if (sensors & GPD_HAS_BME280) {

@@ -21,8 +21,8 @@ Power proxy or sink, such as ZHA with the bundled quirk, receives it.
   (1-Wire, P1.3, 10 bits, 0.25 °C steps): the air temperature alone, the
   soil temperature next to a BME280.
 
-The same image is also built for the EfektaLab BGT1 board (`BOARD=bgt1`,
-`bgt1-gp.hex`), see [EfektaLab BGT1](#efektalab-bgt1).
+The EfektaLab BGT1 variant moved to
+[faronov/efektalab-bgt1-gp](https://github.com/faronov/efektalab-bgt1-gp).
 
 ## Radio protocol
 
@@ -117,50 +117,9 @@ The channel, the sensor set, the key and the frame-counter lease are kept in
 flash page 125 (0x3E800), as a log of 4-byte records written by DMA. A chip
 erase (`cc-tool -e`) therefore means a first start and a new key.
 
-## EfektaLab BGT1
-
-A CC2530 module with a PA/LNA front end, a DS18B20 and two AAA cells. The
-pin map was read from its original Z-Stack firmware:
-
-| Function | Pin |
-|---|---|
-| LED (active high) | P0.1 |
-| Button (active low, pull-up) | P2.0 |
-| DS18B20 supply (high while measuring) | P0.2 |
-| DS18B20 1-Wire (port 0 internal pulls) | P0.3 |
-| PA_EN (radio observation output 0, inverted pa_pd) | P1.1 |
-| LNA_EN (radio observation output 1, inverted lna_pd) | P1.4 |
-| HGM (high-gain mode, always high) | P0.7 |
-
-- Front end: Z-Stack's CC2590/CC2591 wiring (`paLnaChip` 2). The original
-  firmware uses Z-Stack's CC2590 TX power table; this build keeps
-  `GPD_TXPOWER` 0xF5, that table's highest setting (about +11 dBm with a
-  CC2590, more with a CC2591). Which of the two is fitted is not known.
-- Commissioning: DeviceID 0x30 (TemperatureSensor), manufacturer 0x6D6B,
-  model `0xF200 | sensors` (bit 1 DS18B20), server clusters 0x0001 and
-  0x0402. Reports carry the DS18B20 temperature (11 bits, 0.125 °C steps,
-  375 ms conversion; invalid without it, no chip-sensor fallback), battery
-  voltage and battery remaining.
-- Battery: 0 % at 2.0 V, 100 % from 2.9 V, a rough piecewise curve for two
-  alkaline AAA cells; approximate.
-- Reports: the sensor wakes every 60 s but transmits only when the
-  temperature moved by 0.25 °C or more from the last report, became valid or
-  invalid, or after 30 minutes without a report (heartbeat). The button and
-  (re)commissioning always report. The battery is sent with these reports.
-- Button, LED, channel search and settings work as on the FlowerX.
-- ZHA: its own quirk, `quirks/zha_quirk_efektalab_bgt1_gp.py` ("EfektaLab
-  BGT1 GP").
-- Zigbee2MQTT: external converter `z2m/efektalab_bgt1_gp.mjs`. Copy it to
-  `<z2m data>/external_converters/` and restart Zigbee2MQTT. zigbee-herdsman
-  names the device `GreenPower_48` after its DeviceID, so the converter
-  matches any Green Power TemperatureSensor. Tested against
-  zigbee-herdsman's parsing and decryption of this firmware's frames, not
-  with a live Zigbee2MQTT.
-
 ## Pairing with ZHA
 
-1. Copy `quirks/zha_quirk_diyruz_flowerx_gp.py` (or, for BGT1,
-   `quirks/zha_quirk_efektalab_bgt1_gp.py`) to
+1. Copy `quirks/zha_quirk_diyruz_flowerx_gp.py` to
    `<HA config>/custom_zha_quirks/` and restart Home Assistant. This needs a
    ZHA build with Green Power support.
 2. Permit joining.
@@ -171,7 +130,7 @@ join is open. After pairing, close permit join.
 
 ## Flashing
 
-Download `flower-gp.hex` (or `bgt1-gp.hex`) from the
+Download `flower-gp.hex` from the
 [latest release](https://github.com/faronov/flower-cc2530-gp/releases/latest)
 and write it with a CC Debugger, for example:
 
@@ -187,7 +146,6 @@ cd flower-cc2530-gp
 make test                       # frame builder, host (ASan/UBSan)
 make test-quirk                 # needs: pip install pytest zha zha-quirks
 make firmware LLVM_TOOLS=<llvm-build>/bin LLVM_SRC=<llvm-project>
-make firmware BOARD=bgt1 LLVM_TOOLS=<llvm-build>/bin LLVM_SRC=<llvm-project>
 ```
 
 `LLVM_SRC` must be the [faronov/llvm-project](https://github.com/faronov/llvm-project)
@@ -195,8 +153,7 @@ checkout at the revision in `cc2530-zigbee/tools/llvm/toolchain.json`. The
 MCS-51 runtime and startup come from it, and `LLVM_TOOLS` must be built
 from the same revision (`clang`, `lld`, `llvm-ar`, `llvm-objcopy`; see
 `.github/workflows/ci.yml`). The output is
-`build/firmware/flower-gp.{hex,elf,map}`, or `build/bgt1/bgt1-gp.{hex,elf,map}`
-with `BOARD=bgt1`.
+`build/firmware/flower-gp.{hex,elf,map}`.
 
 The image is linked with `cc2530-root.ld`. It is LLVM's `cc2530.ld` without
 the code bank sections, so every function stays in the 32-KB common area.
@@ -224,8 +181,8 @@ calibrated against a reference load:
 ## Releases
 
 Pushing a `v*` tag builds the firmware in CI. The workflow then publishes
-`flower-gp.hex`, `flower-gp.elf`, `bgt1-gp.hex`, `bgt1-gp.elf`, `SHA256SUMS`
-and both ZHA quirks as a GitHub release.
+`flower-gp.hex`, `flower-gp.elf`, `SHA256SUMS` and the ZHA quirk as a GitHub
+release.
 
 ## License
 

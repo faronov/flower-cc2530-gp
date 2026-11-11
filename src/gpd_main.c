@@ -76,8 +76,7 @@
 #ifndef GPD_REPEAT_GAP
 #define GPD_REPEAT_GAP 655UL
 #endif
-/* SWRS081B Table 2: F5 is +4.5 dBm, also the highest setting of the BGT1
- * vendor firmware's PA table (Z-Stack CC2590 table, 11 dBm). */
+/* SWRS081B Table 2: F5 is +4.5 dBm. */
 #ifndef GPD_TXPOWER
 #define GPD_TXPOWER 0xf5u
 #endif
@@ -121,15 +120,9 @@
 #define P2ICONL 0x08u
 #define P2IE 0x02u
 #define SECOND 32768UL
-#if BOARD_PA_LNA
-/* BGT1: DS18B20 supply settling, asleep. */
-#define WARMUP 328UL       /* 10 ms */
-#define WARMUP_MODE SLEEP_PM2
-#else
 /* Soil probe warm-up; the CPU idles because PM2 would stop Timer 3. */
 #define WARMUP 1639UL      /* 50 ms */
 #define WARMUP_MODE SLEEP_IDLE
-#endif
 #define TX_WAIT 164UL      /* 5 ms per GPDF (about 1.6 ms on air) */
 #define LED_ON 655UL       /* 20 ms flash */
 #define BLINK 4915UL       /* 150 ms */
@@ -171,11 +164,6 @@ static volatile MCU_XDATA uint16_t polls;
  * report's transmissions, and their count. */
 static MCU_XDATA uint16_t loaded;
 static MCU_XDATA uint8_t loading, loads;
-#ifdef BOARD_HEARTBEAT
-/* The temperature last reported and the intervals since. */
-static MCU_XDATA int16_t reported;
-static MCU_XDATA uint8_t quiet;
-#endif
 #if GPD_SECURITY
 /* The next security frame counter. */
 static MCU_XDATA uint32_t counter;
@@ -239,16 +227,6 @@ static void radio_setup(uint8_t channel)
     MMIO_XWRITE(0x6191u, 0x69);   /* TXCTRL */
     MMIO_XWRITE(0x618fu, 11u + 5u*(channel-11u));   /* FREQCTRL */
     MMIO_XWRITE(0x6190u, GPD_TXPOWER);
-#if BOARD_PA_LNA
-    /* PA_EN (P1.1) and LNA_EN (P1.4) follow the radio. The observation
-     * outputs do not survive PM2 (SWRU191F 7.12), so every setup sets them;
-     * without them both pins are the low GPIO outputs of flower_startup:
-     * front end off. */
-    MMIO_XWRITE(RFC_OBS_CTRL0, PA_PD_INV);
-    MMIO_XWRITE(OBSSEL1, OBS_SIG0);
-    MMIO_XWRITE(RFC_OBS_CTRL1, LNA_PD_INV);
-    MMIO_XWRITE(OBSSEL4, OBS_SIG1);
-#endif
 }
 
 /* STIF clear; IEN0 = EA|STIE, then PCON.IDLE whose successor must not start
@@ -372,30 +350,24 @@ static void sample(uint8_t detect)
 {
     uint16_t wait;
     uint8_t ds;
-#if BOARD_BME280
     uint8_t bme;
     int16_t die;
-#endif
     uint32_t started;
     S.stage = 2;
     flower_power(1);
     nap(WARMUP, WARMUP_MODE);
     if (detect) S.sensors |= sensors_detect();
-#if BOARD_BME280
     bme = (S.sensors & GPD_HAS_BME280) && bme280_start();
-#endif
     ds = (S.sensors & GPD_HAS_DS18B20) && ds18b20_start();
     started = NOW();
     flower_measure(&values);
     values.humidity = FLOWER_INVALID_U16;
     values.pressure = values.soil_temperature = (int16_t)FLOWER_INVALID_S16;
-#if BOARD_BME280
     if (bme) {
         die = values.temperature;
         bme280_read(&values);
         if (values.temperature == (int16_t)FLOWER_INVALID_S16) values.temperature = die;
     }
-#endif
     flower_excitation_off();
     if (loads) flower_battery(&values, loaded / loads);
     for (wait = DS18B20_CONVERSION; ds; wait += DS18B20_POLL) {
@@ -529,10 +501,6 @@ static void report(void)
     loading = 1;
     send(SECURE(gpd_report(frame, S.seq, S.src, &values, S.sensors)));
     loading = 0;
-#ifdef BOARD_HEARTBEAT
-    reported = values.temperature;
-    quiet = 0;
-#endif
 }
 
 /* Rounds of search, then commissioning and a report; the channel found is
@@ -658,10 +626,6 @@ void main(void)
         }
         if (paired) {
             sample(0);
-#ifdef BOARD_HEARTBEAT
-            if (gpd_temperature_changed(values.temperature, reported, BOARD_REPORT_DELTA) ||
-                ++quiet >= BOARD_HEARTBEAT)
-#endif
             report();
         }
         deadline = (deadline + (uint32_t)GPD_INTERVAL*SECOND) & TIMEBASE_TICKS_MASK;

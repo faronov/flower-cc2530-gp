@@ -26,12 +26,8 @@
 #define PORT_READ(reg) MMIO_READ(reg)
 #define OW_LINE() (PORT_READ(BOARD_ONEWIRE_PORT) & BOARD_FLOWER_ONEWIRE)
 
-#if BOARD_BME280
 static MCU_XDATA uint8_t bme_addr, bme_valid, buf[26];
 static MCU_XDATA bme280_calib_t calib;
-#else
-static MCU_XDATA uint8_t buf[9];
-#endif
 
 static uint16_t ticks(void)
 {
@@ -50,7 +46,6 @@ static void wait_us(uint16_t us)
     until(ticks(), us);
 }
 
-#if BOARD_BME280
 void sensors_bus(uint8_t on)
 {
     MMIO_CLEAR(SOC_P0DIR, BOARD_FLOWER_SCL | BOARD_FLOWER_SDA);
@@ -65,23 +60,7 @@ void sensors_bus(uint8_t on)
         MMIO_SET(SOC_P1INP, BOARD_FLOWER_ONEWIRE);
     }
 }
-#else
-/* The 1-Wire line on the port 0 pulls: up while measuring, down otherwise
- * (the vendor firmware's sleep state of port 0). */
-void sensors_bus(uint8_t on)
-{
-    MMIO_CLEAR(SOC_P0DIR, BOARD_FLOWER_ONEWIRE);
-    if (on) {
-        MMIO_CLEAR(SOC_P2INP, PDUP0);
-        MMIO_WRITE(SOC_T1CTL, T1_DIV8_FREE);
-    } else {
-        MMIO_WRITE(SOC_T1CTL, 0);
-        MMIO_SET(SOC_P2INP, PDUP0);
-    }
-}
-#endif
 
-#if BOARD_BME280
 /* Open drain: low drives the cleared latch, high releases to the pull-up.
  * The latch is cleared before every drive (a read-modify-write of another
  * pin may have copied a released pin's high level into it). */
@@ -182,7 +161,6 @@ static uint8_t bme_write(uint8_t reg, uint8_t value)
     i2c_stop();
     return ok;
 }
-#endif
 
 /* 1-Wire at standard speed; each slot is timed from its falling edge. */
 static void ow_low(void)
@@ -238,19 +216,16 @@ static uint8_t ow_byte(uint8_t b)
 uint8_t sensors_detect(void)
 {
     uint8_t found = 0;
-#if BOARD_BME280
     for (bme_addr = 0x76u; bme_addr <= 0x77u; bme_addr++)
         if (bme_read(bme_addr, BME280_REG_ID, buf, 1) && buf[0] == BME280_ID) {
             found |= SENSOR_BME280;
             break;
         }
-#endif
     if (ow_reset()) found |= SENSOR_DS18B20;
     ow_release();
     return found;
 }
 
-#if BOARD_BME280
 /* Forced mode, 1x oversampling of humidity, temperature and pressure,
  * filter off (datasheet 3.5.1 weather monitoring): at most 9.3 ms. */
 uint8_t bme280_start(void)
@@ -302,7 +277,6 @@ void bme280_read(gpd_values_t MCU_XDATA *v)
         v->humidity = (uint16_t)((rh * 100u + 512u) >> 10);
     }
 }
-#endif
 
 uint8_t ds18b20_start(void)
 {
