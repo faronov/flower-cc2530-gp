@@ -49,6 +49,9 @@ jobs:
           path: llvm
           fetch-depth: 1
           persist-credentials: false
+          sparse-checkout: |
+            cmake/Modules
+            llvm/lib/Target/MCS51
 
       - name: Install build dependencies
         run: |
@@ -56,8 +59,42 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             build-essential cmake ninja-build ccache lld python3 python3-pyelftools
 
+      - name: Download the released LLVM-MCS51 toolchain
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ steps.pin.outputs.repository }}
+          SHA: ${{ steps.pin.outputs.revision }}
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -nE 's/.*set\(LLVM_VERSION_(MAJOR|MINOR|PATCH) ([0-9]+)\).*/\2/p' \
+            llvm/cmake/Modules/LLVMVersion.cmake | paste -sd.)"
+          TAG="mcs51-llvm-${VERSION}-${SHA:0:12}"
+          NAME="$TAG-linux-amd64"
+          mkdir -p toolchain
+          cd toolchain
+          if gh release download "$TAG" -R "$REPO" -p "$NAME.tar.gz" -p SHA256SUMS; then
+            sha256sum --check --ignore-missing --strict SHA256SUMS
+            tar -xzf "$NAME.tar.gz"
+            echo "tools=$PWD/$NAME/bin" >> "$GITHUB_OUTPUT"
+            echo "Toolchain: release \`$TAG\` ($REPO)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::notice::Release $TAG not found in $REPO; building LLVM from source"
+            echo "Toolchain: built from source \`$SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.release.outputs.tools == ''
+        with:
+          repository: ${{ steps.pin.outputs.repository }}
+          ref: ${{ steps.pin.outputs.revision }}
+          path: llvm-full
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Restore compiler cache
         id: compiler-cache
+        if: steps.release.outputs.tools == ''
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
@@ -65,12 +102,13 @@ jobs:
           restore-keys: ccache-mcs51-${{ runner.os }}-
 
       - name: Build LLVM-MCS51
+        if: steps.release.outputs.tools == ''
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
           CCACHE_MAXSIZE: 3G
         run: |
           set -euo pipefail
-          cmake -S llvm/llvm -B llvm-build -G Ninja \
+          cmake -S llvm-full/llvm -B llvm-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=ON \
             -DLLVM_ENABLE_PROJECTS='clang;lld' -DLLVM_TARGETS_TO_BUILD=MCS51 \
             -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF \
@@ -80,15 +118,18 @@ jobs:
           ccache --show-stats
 
       - name: Save compiler cache
-        if: steps.compiler-cache.outputs.cache-hit != 'true'
+        if: steps.release.outputs.tools == '' && steps.compiler-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-mcs51-${{ runner.os }}-${{ steps.pin.outputs.revision }}
 
       - name: Build firmware
+        env:
+          RELEASE_TOOLS: ${{ steps.release.outputs.tools }}
         run: |
-          make firmware LLVM_TOOLS="$GITHUB_WORKSPACE/llvm-build/bin" LLVM_SRC="$GITHUB_WORKSPACE/llvm"
+          set -euo pipefail
+          make firmware LLVM_TOOLS="${RELEASE_TOOLS:-$GITHUB_WORKSPACE/llvm-build/bin}" LLVM_SRC="$GITHUB_WORKSPACE/llvm"
           cd build/firmware
           sha256sum flower-gp.hex flower-gp.elf > SHA256SUMS
           python3 ../../tools/size.py flower-gp.hex | tee -a "$GITHUB_STEP_SUMMARY"
