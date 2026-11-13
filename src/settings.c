@@ -34,18 +34,36 @@ static uint8_t word(uint16_t index, uint8_t MCU_XDATA *out)
     return erased == 0xffu;
 }
 
-/* Index of the first erased word (WORDS when full); the last valid record
+static void clear(settings_t *s)
+{
+    uint8_t i;
+    s->channel = s->sensors = s->keyed = 0;
+    for (i = 0; i < 16u; i++) s->key[i] = 0;
+    s->lease = 0;
+}
+
+/* Index of the first erased word (WORDS when full); the last valid records
  * before it into s. */
 static uint16_t scan(settings_t *s)
 {
     uint16_t i;
-    s->channel = s->sensors = 0;
+    uint8_t k;
+    clear(s);
     for (i = 0; i < WORDS; i++) {
         if (word(i, record)) break;
-        if (record[0] == SETTINGS_MAGIC && record[3] == SETTINGS_CHECK(record[1], record[2]) &&
-            (record[1] == 0 || (record[1] >= 11u && record[1] <= 26u))) {
-            s->channel = record[1];
-            s->sensors = record[2];
+        if (record[3] != SETTINGS_CHECK(record[0], record[1], record[2])) continue;
+        k = (uint8_t)(record[0] - SETTINGS_KEY);
+        if (record[0] == SETTINGS_MAGIC) {
+            if (record[1] == 0 || (record[1] >= 11u && record[1] <= 26u)) {
+                s->channel = record[1];
+                s->sensors = record[2];
+            }
+        } else if (k < 8u) {
+            s->key[2u*k] = record[1];
+            s->key[2u*k + 1u] = record[2];
+            s->keyed |= (uint8_t)(1u << k);
+        } else if (record[0] == SETTINGS_LEASE) {
+            s->lease = (uint16_t)(record[1] | (uint16_t)record[2] << 8);
         }
     }
     return i;
@@ -89,15 +107,30 @@ void settings_load(settings_t *s)
     (void)scan(s);
 }
 
+static MCU_XDATA settings_t old;
+static MCU_XDATA uint16_t next;
+
+static void put(uint8_t magic, uint8_t b1, uint8_t b2)
+{
+    record[0] = magic; record[1] = b1; record[2] = b2;
+    record[3] = SETTINGS_CHECK(magic, b1, b2);
+    write(next++);
+}
+
+/* The records whose values differ from old: at most 10. */
 void settings_save(const settings_t *s)
 {
-    settings_t old;
-    uint16_t free = scan(&old);
-    if (old.channel == s->channel && old.sensors == s->sensors) return;
-    if (free >= WORDS) { erase(); free = 0; }
-    record[0] = SETTINGS_MAGIC; record[1] = s->channel; record[2] = s->sensors;
-    record[3] = SETTINGS_CHECK(s->channel, s->sensors);
-    write(free);
+    uint8_t k;
+    next = scan(&old);
+    if (next > WORDS - 10u) { erase(); next = 0; clear(&old); }
+    if (old.channel != s->channel || old.sensors != s->sensors)
+        put(SETTINGS_MAGIC, s->channel, s->sensors);
+    for (k = 0; k < 8u; k++)
+        if ((s->keyed >> k & 1u) && (!(old.keyed >> k & 1u) || old.key[2u*k] != s->key[2u*k] ||
+                                     old.key[2u*k + 1u] != s->key[2u*k + 1u]))
+            put((uint8_t)(SETTINGS_KEY + k), s->key[2u*k], s->key[2u*k + 1u]);
+    if (old.lease != s->lease)
+        put(SETTINGS_LEASE, (uint8_t)s->lease, (uint8_t)(s->lease >> 8));
 }
 
 void settings_clear(void)

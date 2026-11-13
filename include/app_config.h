@@ -25,6 +25,8 @@
 #define BOARD_FLOWER_SCL 0x20u
 #define BOARD_FLOWER_SDA 0x40u
 #define BOARD_FLOWER_ONEWIRE 0x08u
+#define BOARD_ONEWIRE_PORT SOC_P1
+#define BOARD_ONEWIRE_DIR SOC_P1DIR
 
 /* Timer 3 drives the soil excitation. */
 #define CC2530_APP_REGISTER_LIST(X) \

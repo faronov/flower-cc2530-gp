@@ -19,7 +19,12 @@
  * values instead, so stale (85 C power-on) data is rejected. */
 #define DS_TH 0x00u
 #define DS_TL 0x64u
-#define DS_CONFIG_10BIT 0x3fu
+/* SWRU191F 7.18 P2INP.PDUP0: port 0 pull-down. */
+#define PDUP0 0x20u
+/* One expansion level so BOARD_ONEWIRE_PORT becomes the register name
+ * before MMIO_READ pastes it. */
+#define PORT_READ(reg) MMIO_READ(reg)
+#define OW_LINE() (PORT_READ(BOARD_ONEWIRE_PORT) & BOARD_FLOWER_ONEWIRE)
 
 static MCU_XDATA uint8_t bme_addr, bme_valid, buf[26];
 static MCU_XDATA bme280_calib_t calib;
@@ -160,13 +165,13 @@ static uint8_t bme_write(uint8_t reg, uint8_t value)
 /* 1-Wire at standard speed; each slot is timed from its falling edge. */
 static void ow_low(void)
 {
-    MMIO_CLEAR(SOC_P1, BOARD_FLOWER_ONEWIRE);
-    MMIO_SET(SOC_P1DIR, BOARD_FLOWER_ONEWIRE);
+    MMIO_CLEAR(BOARD_ONEWIRE_PORT, BOARD_FLOWER_ONEWIRE);
+    MMIO_SET(BOARD_ONEWIRE_DIR, BOARD_FLOWER_ONEWIRE);
 }
 
 static void ow_release(void)
 {
-    MMIO_CLEAR(SOC_P1DIR, BOARD_FLOWER_ONEWIRE);
+    MMIO_CLEAR(BOARD_ONEWIRE_DIR, BOARD_FLOWER_ONEWIRE);
 }
 
 /* Reset; 1 when a device answered with a presence pulse. */
@@ -179,9 +184,9 @@ static uint8_t ow_reset(void)
     start = ticks();
     ow_release();
     until(start, 70);
-    present = !(MMIO_READ(SOC_P1) & BOARD_FLOWER_ONEWIRE);
+    present = !OW_LINE();
     until(start, 480);
-    return present && (MMIO_READ(SOC_P1) & BOARD_FLOWER_ONEWIRE);
+    return present && OW_LINE();
 }
 
 static uint8_t ow_bit(uint8_t b)
@@ -192,7 +197,7 @@ static uint8_t ow_bit(uint8_t b)
     ow_release();
     if (b) {
         until(start, 12);
-        b = (MMIO_READ(SOC_P1) & BOARD_FLOWER_ONEWIRE) ? 1u : 0u;
+        b = OW_LINE() ? 1u : 0u;
     }
     until(start, 70);
     return b;
@@ -275,14 +280,18 @@ void bme280_read(gpd_values_t MCU_XDATA *v)
 
 uint8_t ds18b20_start(void)
 {
-    uint8_t busy;
     if (!ow_reset()) return 0;
     ow_byte(OW_SKIP_ROM); ow_byte(OW_WRITE);
-    ow_byte(DS_TH); ow_byte(DS_TL); ow_byte(DS_CONFIG_10BIT);
+    ow_byte(DS_TH); ow_byte(DS_TL); ow_byte(DS18B20_CONFIG);
     if (!ow_reset()) return 0;
     ow_byte(OW_SKIP_ROM); ow_byte(OW_CONVERT);
-    /* An externally powered DS18B20 reads 0 while converting. */
-    busy = !ow_bit(1);
+    return ds18b20_busy();
+}
+
+/* An externally powered DS18B20 reads 0 while converting. */
+uint8_t ds18b20_busy(void)
+{
+    uint8_t busy = !ow_bit(1);
     ow_release();
     return busy;
 }
@@ -297,9 +306,9 @@ void ds18b20_read(gpd_values_t MCU_XDATA *v)
     for (i = 0; i < 9u; i++) buf[i] = ow_byte(0xffu);
     ow_release();
     if (onewire_crc8(buf, 8) != buf[8] || buf[2] != DS_TH || buf[3] != DS_TL ||
-        buf[4] != DS_CONFIG_10BIT)
+        buf[4] != DS18B20_CONFIG)
         return;
-    raw = (int16_t)((uint16_t)buf[1] << 8 | (buf[0] & 0xfcu));
+    raw = (int16_t)((uint16_t)buf[1] << 8 | (buf[0] & DS18B20_MASK));
     if (raw < -55*16 || raw > 125*16) return;
     v->soil_temperature = (int16_t)(((int32_t)raw * 25) / 4);
 }
